@@ -1,0 +1,12 @@
+# 密钥配置，绝不能提交
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# Django sqlite 数据库
+db.sqlite3
+
+# agent 工具写入的文件（沙箱目录）
+workspace/

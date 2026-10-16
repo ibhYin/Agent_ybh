@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能体 MVP</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif;
+    background: #f5f5f7; color: #1d1d1f; height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 12px 20px; background: #fff; border-bottom: 1px solid #e5e5e7;
+    display: flex; align-items: center; justify-content: center; gap: 12px; position: relative;
+  }
+  header h1 { font-size: 17px; font-weight: 600; }
+  header p { font-size: 12px; color: #86868b; margin-top: 2px; }
+  #settings-btn {
+    position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+    padding: 6px 14px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff;
+    font-size: 13px; cursor: pointer;
+  }
+  #settings-btn:hover { border-color: #2563eb; color: #2563eb; }
+
+  #config-banner {
+    max-width: 820px; width: 100%; margin: 12px auto 0; padding: 10px 14px;
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+    font-size: 13px; color: #92400e; display: none; align-items: center; gap: 10px;
+  }
+  #config-banner button {
+    margin-left: auto; padding: 4px 12px; border: none; border-radius: 6px;
+    background: #f59e0b; color: #fff; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+
+  #messages { flex: 1; overflow-y: auto; padding: 20px; max-width: 860px; width: 100%; margin: 0 auto; }
+  .msg { display: flex; margin-bottom: 14px; }
+  .msg.user { justify-content: flex-end; }
+  .bubble { max-width: 72%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg.user .bubble { background: #2563eb; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.assistant .bubble { background: #fff; border: 1px solid #e5e5e7; border-bottom-left-radius: 4px; }
+  .msg.error .bubble { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+
+  .tool-card { margin: 6px 0 8px 14px; background: #fff; border: 1px solid #e5e5e7; border-radius: 10px; font-size: 13px; max-width: 82%; }
+  .tool-card summary { list-style: none; cursor: pointer; padding: 8px 12px; display: flex; align-items: center; gap: 8px; user-select: none; }
+  .tool-card summary::-webkit-details-marker { display: none; }
+  .tool-name { font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: #6d28d9; }
+  .tool-status { font-size: 11px; color: #86868b; margin-left: auto; }
+  .tool-status.running::after { content: ""; display: inline-block; width: 10px; height: 10px; margin-left: 6px; border: 2px solid #d1d5db; border-top-color: #6d28d9; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -1px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .tool-body { padding: 0 12px 10px; border-top: 1px dashed #e5e5e7; }
+  .tool-body .label { font-size: 11px; color: #86868b; margin: 8px 0 3px; }
+  .tool-body pre { background: #f8f8fa; border-radius: 6px; padding: 8px 10px; font-size: 12px; font-family: ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
+
+  footer { background: #fff; border-top: 1px solid #e5e5e7; padding: 12px 20px; display: flex; gap: 10px; max-width: 900px; width: 100%; margin: 0 auto; }
+  #input { flex: 1; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; outline: none; }
+  #input:focus { border-color: #2563eb; }
+  #send { padding: 10px 22px; border: none; border-radius: 10px; background: #2563eb; color: #fff; font-size: 14px; cursor: pointer; }
+  #send:disabled { background: #93c5fd; cursor: not-allowed; }
+  #input:disabled { background: #f5f5f7; }
+
+  /* ---------- 设置面板 ---------- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal {
+    background: #fff; border-radius: 14px; width: 560px; max-width: 92vw; max-height: 84vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-header {
+    padding: 14px 18px; border-bottom: 1px solid #e5e5e7;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-header h2 { font-size: 15px; font-weight: 600; }
+  #close-settings { border: none; background: none; font-size: 18px; cursor: pointer; color: #86868b; }
+  #close-settings:hover { color: #1d1d1f; }
+  .modal-body { padding: 16px 18px; overflow-y: auto; }
+  .modal-body section { margin-bottom: 20px; }
+  .modal-body h3 { font-size: 13px; color: #86868b; margin-bottom: 10px; font-weight: 600; }
+  .modal label { display: block; font-size: 12px; color: #1d1d1f; margin: 8px 0 4px; }
+  .modal input {
+    width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px;
+    font-size: 13px; outline: none; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .modal input:focus { border-color: #2563eb; }
+  .hint { font-size: 11px; color: #86868b; margin-top: 6px; line-height: 1.5; }
+  #save-config {
+    margin-top: 12px; padding: 8px 18px; border: none; border-radius: 8px;
+    background: #2563eb; color: #fff; font-size: 13px; cursor: pointer;
+  }
+  #save-config:hover { background: #1d4ed8; }
+  #cfg-status { font-size: 12px; color: #16a34a; margin-top: 8px; min-height: 16px; }
+
+  .tool-item { border: 1px solid #e5e5e7; border-radius: 8px; margin-bottom: 8px; font-size: 12px; }
+  .tool-item summary { list-style: none; cursor: pointer; padding: 8px 12px; display: flex; gap: 8px; align-items: baseline; }
+  .tool-item summary::-webkit-details-marker { display: none; }
+  .tool-item .t-name { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 600; color: #6d28d9; white-space: nowrap; }
+  .tool-item .t-desc { color: #4b5563; }
+  .tool-item pre { background: #f8f8fa; border-top: 1px dashed #e5e5e7; padding: 8px 12px; font-size: 11px; font-family: ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>智能体 MVP</h1>
+    <p>手写 Agentic Loop：模型思考 → 调用工具 → 结果回传 → 最终回答（过程实时可见）</p>
+  </div>
+  <button id="settings-btn">设置</button>
+</header>
+
+<main id="messages"></main>
+
+<!-- 未配置 LLM 时的引导横幅（本地有配置后自动隐藏） -->
+<div id="config-banner">
+  <span>尚未配置 LLM，请先在右上角【设置】中填写 API 地址、Key 和模型名称</span>
+  <button id="banner-settings">去配置</button>
+</div>
+
+<footer>
+  <input id="input" placeholder="试试：现在几点了？ 或 计算 (3+5)*7 的结果，然后写入 result.txt" autocomplete="off">
+  <button id="send">发送</button>
+</footer>
+
+<!-- 设置面板：LLM 配置（前端优先，留空回退 .env）+ 可用工具列表 -->
+<div id="settings-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>设置</h2>
+      <button id="close-settings">✕</button>
+    </div>
+    <div class="modal-body">
+      <section>
+        <h3>LLM 配置（保存到服务器，立即生效；API Key 已配置时留空表示不修改）</h3>
+        <label for="cfg-base-url">Base URL</label>
+        <input id="cfg-base-url" placeholder="https://api.xxx.com/v1">
+        <label for="cfg-api-key">API Key</label>
+        <input id="cfg-api-key" type="password" placeholder="已配置则留空，输入新值可覆盖">
+        <label for="cfg-model">Model</label>
+        <input id="cfg-model" placeholder="如 deepseek-chat / qwen-plus">
+        <button id="save-config">保存配置</button>
+        <p id="cfg-status"></p>
+        <p id="env-status" class="hint"></p>
+      </section>
+      <section>
+        <h3>可用工具（<span id="tool-count">0</span>）</h3>
+        <div id="tool-list"></div>
+        <p class="hint">工具在 agent_engine/tools.py 中用 @tool 注册，列表自动生成</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+const messagesEl = document.getElementById("messages");
+const inputEl = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+
+// 会话 ID：首次访问生成一个 UUID 存 localStorage，刷新后靠它从后端恢复历史
+let sessionId = localStorage.getItem("session_id");
+if (!sessionId) {
+  sessionId = crypto.randomUUID();
+  localStorage.setItem("session_id", sessionId);
+}
+
+// 工具卡片表：tool_call_id -> 卡片元素（实时渲染与历史渲染共用）
+const toolCards = new Map();
+
+function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+function addUserBubble(text) {
+  const div = document.createElement("div");
+  div.className = "msg user";
+  const b = document.createElement("div");
+  b.className = "bubble";
+  b.textContent = text;
+  div.appendChild(b);
+  messagesEl.appendChild(div);
+  scrollBottom();
+}
+
+function addAssistantBubble() {
+  const div = document.createElement("div");
+  div.className = "msg assistant";
+  const b = document.createElement("div");
+  b.className = "bubble";
+  div.appendChild(b);
+  messagesEl.appendChild(div);
+  scrollBottom();
+  return b;
+}
+
+function addErrorBubble(text) {
+  const div = document.createElement("div");
+  div.className = "msg error";
+  const b = document.createElement("div");
+  b.className = "bubble";
+  b.textContent = text;
+  div.appendChild(b);
+  messagesEl.appendChild(div);
+  scrollBottom();
+}
+
+// 创建工具卡片（可折叠）。status: "running" | "done"
+function createToolCard(id, name, args, status) {
+  const details = document.createElement("details");
+  details.className = "tool-card";
+  details.open = status === "running";
+  const summary = document.createElement("summary");
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "tool-name";
+  nameSpan.textContent = name;
+  const statusSpan = document.createElement("span");
+  statusSpan.className = "tool-status " + (status === "running" ? "running" : "");
+  statusSpan.textContent = status === "running" ? "执行中" : "已完成";
+  summary.append(nameSpan, statusSpan);
+  const body = document.createElement("div");
+  body.className = "tool-body";
+  const argsBlock = document.createElement("pre");
+  argsBlock.textContent = args;
+  const argsLabel = document.createElement("div");
+  argsLabel.className = "label";
+  argsLabel.textContent = "参数";
+  body.append(argsLabel, argsBlock);
+  details.append(summary, body);
+  messagesEl.appendChild(details);
+  scrollBottom();
+  toolCards.set(id, { el: details, body, resultEl: null });
+  return toolCards.get(id);
+}
+
+function setToolResult(id, name, result) {
+  const card = toolCards.get(id);
+  if (!card) return;
+  const label = document.createElement("div");
+  label.className = "label";
+  label.textContent = "结果";
+  const pre = document.createElement("pre");
+  pre.textContent = result;
+  card.body.append(label, pre);
+  const statusSpan = card.el.querySelector(".tool-status");
+  statusSpan.textContent = "已完成";
+  statusSpan.classList.remove("running");
+  card.el.open = false; // 结果就绪后收起卡片，保持聊天流整洁
+  scrollBottom();
+}
+
+// ---------- SSE 事件处理 ----------
+function handleEvent(event) {
+  switch (event.type) {
+    case "text_delta":
+      if (!handleEvent.currentBubble) handleEvent.currentBubble = addAssistantBubble();
+      handleEvent.currentBubble.textContent += event.content;
+      scrollBottom();
+      break;
+    case "tool_start":
+      handleEvent.currentBubble = null; // 工具调用结束本轮文本输出
+      createToolCard(event.id, event.name, event.args, "running");
+      break;
+    case "tool_result":
+      setToolResult(event.id, event.name, event.result);
+      break;
+    case "error":
+      handleEvent.currentBubble = null;
+      addErrorBubble(event.message);
+      break;
+    // "done" / "message"：文本已实时显示 / 后端落库用，前端无需处理
+  }
+}
+
+// ---------- 历史消息渲染（刷新后恢复对话） ----------
+function renderHistory(messages) {
+  for (const m of messages) {
+    if (m.role === "user") {
+      addUserBubble(m.content);
+    } else if (m.role === "assistant") {
+      if (m.content) {
+        const b = addAssistantBubble();
+        b.textContent = m.content;
+      }
+      for (const tc of m.tool_calls || []) {
+        createToolCard(tc.id, tc.function.name, tc.function.arguments, "done");
+      }
+    } else if (m.role === "tool") {
+      setToolResult(m.tool_call_id, "", m.content);
+    }
+  }
+}
+
+async function init() {
+  try {
+    const res = await fetch(`/chat/history?session_id=${encodeURIComponent(sessionId)}`);
+    const data = await res.json();
+    renderHistory(data.messages || []);
+  } catch (e) {
+    addErrorBubble("无法加载历史记录，请确认后端服务已启动（python manage.py runserver）");
+  }
+  checkConfigBanner();
+}
+
+// 后端数据库和 .env 都没有 API Key 时，显示顶部引导横幅
+async function checkConfigBanner() {
+  const banner = document.getElementById("config-banner");
+  try {
+    const res = await fetch("/chat/config");
+    const c = await res.json();
+    if (!c.api_key_configured) banner.style.display = "flex";
+  } catch (e) { /* 后端不可达时保持隐藏 */ }
+}
+
+// ---------- 发送 ----------
+async function send() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+  inputEl.value = "";
+  addUserBubble(text);
+  setBusy(true);
+  handleEvent.currentBubble = null;
+  // LLM 配置存后端数据库，前端不持有、不传输 API Key
+  try {
+    const res = await fetch("/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message: text }),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // SSE 协议：事件以空行分隔，每行形如 "data: {...}"
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const line = chunk.split("\n").find(l => l.startsWith("data: "));
+        if (line) handleEvent(JSON.parse(line.slice(6)));
+      }
+    }
+  } catch (e) {
+    addErrorBubble("请求失败：" + e.message + "，请确认后端服务已启动");
+  } finally {
+    setBusy(false);
+  }
+}
+
+function setBusy(busy) {
+  sendBtn.disabled = busy;
+  inputEl.disabled = busy;
+  if (!busy) inputEl.focus();
+}
+
+// ---------- 设置面板 ----------
+const settingsModal = document.getElementById("settings-modal");
+const cfgBaseUrl = document.getElementById("cfg-base-url");
+const cfgApiKey = document.getElementById("cfg-api-key");
+const cfgModel = document.getElementById("cfg-model");
+const cfgStatus = document.getElementById("cfg-status");
+const envStatus = document.getElementById("env-status");
+
+function openSettings() {
+  // 从后端读取当前配置；API Key 不回显（留空 = 不修改已保存的 key）
+  cfgBaseUrl.value = "";
+  cfgApiKey.value = "";
+  cfgModel.value = "";
+  cfgStatus.textContent = "";
+  settingsModal.classList.remove("hidden");
+  loadTools();
+  loadEnvStatus();
+}
+
+function closeSettings() { settingsModal.classList.add("hidden"); }
+
+document.getElementById("settings-btn").addEventListener("click", openSettings);
+document.getElementById("banner-settings").addEventListener("click", openSettings);
+document.getElementById("close-settings").addEventListener("click", closeSettings);
+settingsModal.addEventListener("click", e => { if (e.target === settingsModal) closeSettings(); });
+
+document.getElementById("save-config").addEventListener("click", async () => {
+  const cfg = {};
+  if (cfgBaseUrl.value.trim()) cfg.base_url = cfgBaseUrl.value.trim();
+  if (cfgApiKey.value.trim()) cfg.api_key = cfgApiKey.value.trim();
+  if (cfgModel.value.trim()) cfg.model = cfgModel.value.trim();
+  if (!cfg.base_url && !cfg.api_key && !cfg.model) {
+    cfgStatus.textContent = "没有可保存的内容";
+    return;
+  }
+  try {
+    const res = await fetch("/chat/config-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cfg),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    cfgStatus.textContent = "已保存到服务器，立即生效";
+    cfgApiKey.value = "";
+    if (cfg.api_key) document.getElementById("config-banner").style.display = "none";
+    loadEnvStatus();
+  } catch (e) {
+    cfgStatus.textContent = "保存失败：" + e.message;
+  }
+});
+
+// 显示当前生效配置（数据库优先，空值回退 .env；api_key 只显示是否配置）
+async function loadEnvStatus() {
+  try {
+    const res = await fetch("/chat/config");
+    const c = await res.json();
+    envStatus.textContent = `当前生效：${c.base_url} · ${c.model} · API Key ${c.api_key_configured ? "已配置" : "未配置"}（来源：${c.source}）`;
+  } catch (e) {
+    envStatus.textContent = "无法读取当前配置";
+  }
+}
+
+// 可用工具列表（后端从 @tool 注册表自动生成）
+async function loadTools() {
+  try {
+    const res = await fetch("/chat/tools");
+    const { tools } = await res.json();
+    document.getElementById("tool-count").textContent = tools.length;
+    const list = document.getElementById("tool-list");
+    list.innerHTML = "";
+    for (const t of tools) {
+      const f = t.function;
+      const details = document.createElement("details");
+      details.className = "tool-item";
+      const summary = document.createElement("summary");
+      const name = document.createElement("span");
+      name.className = "t-name";
+      name.textContent = f.name;
+      const desc = document.createElement("span");
+      desc.className = "t-desc";
+      desc.textContent = f.description;
+      summary.append(name, desc);
+      const params = document.createElement("pre");
+      params.textContent = "参数 schema: " + JSON.stringify(f.parameters, null, 2);
+      details.append(summary, params);
+      list.appendChild(details);
+    }
+  } catch (e) {
+    document.getElementById("tool-list").textContent = "工具列表加载失败";
+  }
+}
+
+sendBtn.addEventListener("click", send);
+inputEl.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+init();
+</script>
+</body>
+</html>
