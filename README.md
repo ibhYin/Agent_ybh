@@ -6,19 +6,26 @@
 - LLM：OpenAI 兼容协议，**任意第三方服务**（DeepSeek / Kimi / 通义千问 / 硅基流动 / vLLM / Ollama…），在**页面右上角【设置】面板**即可切换（.env 仅作可选兜底）
 - 工具：**页面设置面板实时查看可用工具列表**（@tool 注册后自动出现）
 - 对话：sqlite 持久化，刷新页面不丢失
+- 安全：工具沙箱（workspace/）、注入防护、API Key 加密存储
+
+## 环境要求
+
+- Python 3.10+（推荐 conda 环境 `langchain`）
+- 现代浏览器
+- 自备任意 OpenAI 兼容协议的 LLM API（地址 / Key / 模型名）
 
 ## 快速开始
 
 ```bash
 conda activate langchain
-pip install -r requirements.txt          # 只需补装 django（openai、python-dotenv 已有）
+pip install -r requirements.txt          # django / openai / python-dotenv / cryptography
 python manage.py migrate                 # 初始化 sqlite 数据库（首次）
 python manage.py runserver               # 打开 http://127.0.0.1:8000
 ```
 
-也可以直接双击 `start.command`（仅负责启动服务并打开浏览器，无需任何配置）。
+也可以直接双击 `start.command` 一键启动：自动激活 conda `langchain` 环境、检查依赖、初始化数据库并打开浏览器，全程无需命令行操作。
 
-配置 LLM 有两种方式（前端配置优先，留空项回退 .env）：
+配置 LLM 有两种方式（数据库中的配置优先，未配置的项自动回退 .env）：
 
 1. **页面右上角【设置】（推荐）**：输入 Base URL / API Key / Model，保存到服务器数据库（API Key 加密存储，前端不持有明文），立即生效
 2. **.env 文件（可选兜底）**：改完需重启服务
@@ -107,13 +114,15 @@ def calculate(expression: str) -> float:
 只需三步（工具名、描述、参数 schema 全部自动生成，前端也自动支持）：
 
 ```python
-from agent_engine.tools import tool
+from agent_engine.tools import tool, _resolve_safe_path
 
 @tool
 def read_file(path: str) -> str:
-    """读取指定文本文件的内容。"""
-    return open(path, encoding="utf-8").read()
+    """读取工作区内文本文件的内容（相对 workspace/ 的路径，如 "notes.txt"）。"""
+    return _resolve_safe_path(path).read_text(encoding="utf-8")
 ```
+
+涉及文件路径的工具统一用 `_resolve_safe_path()` 保持沙箱约束（越界路径会返回错误文本给模型自行纠正）。
 
 ## 切换不同的 LLM 服务
 
@@ -140,8 +149,9 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 
 ## 后续演进方向（当前刻意简化）
 
-- 多会话列表（当前只有单会话 + localStorage）
+- 多会话列表（当前只有单会话，session_id 存 localStorage）
 - 用户系统与消息归属（当前 `session_id` 谁都能查）
+- 访问鉴权（当前服务仅监听 127.0.0.1，无访问口令）
 - CSRF 防护（当前 `@csrf_exempt` 仅为本地学习简化）
-- 工具权限控制（当前工具可写任意路径）
-- 流式中断时的断点恢复（当前已保证用户消息不丢）
+- API 用量 / 频率限制（当前仅 10 轮迭代上限）
+- 加密密钥独立管理（当前由 Django SECRET_KEY 派生）
