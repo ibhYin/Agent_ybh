@@ -11,8 +11,6 @@ db.sqlite3
 # agent 工具写入的文件（沙箱目录）
 workspace/
 
-# 新项目独立仓库，避免父仓库把它当嵌套 repo
-askdb/
-
 # 求职素材（私人，本地独立仓库，不推送）
+# askdb 已拆到容器根目录（../askdb/），不在本仓库内
 career/
