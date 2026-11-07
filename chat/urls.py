@@ -1,11 +1,15 @@
 from django.urls import path
 
-from . import views
+from . import a2a_views, views
 
 urlpatterns = [
     path("", views.index, name="index"),
     path("mcp", views.mcp_page, name="mcp_page"),
     path("architecture", views.architecture_page, name="architecture_page"),
+    # A2A（Agent2Agent）：对外提供 agent 能力
+    path("agent-card.json", a2a_views.agent_card, name="a2a_agent_card"),
+    path(".well-known/agent-card.json", a2a_views.a2a_well_known, name="a2a_agent_card_well_known"),
+    path("a2a", a2a_views.a2a_endpoint, name="a2a_endpoint"),
     path("architecture/data", views.architecture_data, name="architecture_data"),
     path("chat/sessions", views.sessions, name="sessions"),
     path("chat/sessions/create", views.session_create, name="session_create"),

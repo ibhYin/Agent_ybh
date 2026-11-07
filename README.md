@@ -9,7 +9,8 @@
 - MCP 服务端：同一份工具注册表能作为 **MCP 服务**被 Claude Desktop / Cursor 直接调用，支持 stdio 与 SSE 两种传输（`python -m agent_engine.mcp_server [--transport sse]`）
 - MCP 客户端：本项目的 agent 也能**反过来调用外部 MCP 服务**，在【设置 → MCP 服务】里增删，或写根目录 `mcp.json`
 - 本地 MCP 服务：内置**文件系统**与 **SQLite 只读**两个独立服务，独立页面 `/mcp` 管理状态、工具、启停
-- 架构图：`/architecture` 交互页（分层 / 功能 / 数据流 / MCP 双向），节点可点看代码位置
+- 架构图：`/architecture` 交互页（分层 / 功能 / 数据流 / MCP 双向 / A2A），节点可点看代码位置
+- A2A：作为 **Agent2Agent 服务端**对外协作（`/agent-card.json` + `/a2a`），任务有生命周期、可多轮、可取消
 - 会话：sqlite 持久化，支持多会话（切换 / 重命名 / 删除），标题自动取第一条消息
 - 执行过程：工具名、参数、返回与耗时在右栏时间线实时展开，区分 LOCAL / MCP
 - 安全：工具沙箱（workspace/）、注入防护、API Key 加密存储
@@ -237,6 +238,51 @@ python -m agent_engine.mcp_server --transport sse --host 0.0.0.0  # 对外监听
 python -m unittest agent_engine.tests_mcp_sse -v
 ```
 
+## A2A：把 agent 本身当服务（Agent2Agent）
+
+MCP 是「agent 用工具」，A2A 是「agent 找 agent」。本项目两边都做了：
+
+| | MCP（已有） | A2A（本次） |
+|---|---|---|
+| 对外提供 | 一组工具函数 | 一个完整的 agent |
+| 调用形态 | 一次一个调用，无状态 | Task 有生命周期，可多轮、可取消 |
+| 返回 | 文本 | 状态 + 消息历史 + artifacts |
+| 发现 | 工具清单 | `AgentCard`（技能、能力、输入输出模式） |
+
+### 端点
+
+```bash
+curl http://127.0.0.1:3000/agent-card.json      # 能力发现
+curl http://127.0.0.1:3000/.well-known/agent-card.json   # 302 到上面那个
+```
+
+JSON-RPC 端点 `POST /a2a`，方法名同时接受两代写法：
+
+| 方法 | 说明 |
+|---|---|
+| `message/send` / `SendMessage` | 发消息，阻塞到终态（可用 `returnImmediately` 立即返回） |
+| `message/stream` / `SendStreamingMessage` | 同上但走 SSE，推送 `task` / `status-update` / `message` / `artifact-update` |
+| `tasks/get` / `GetTask` | 查任务状态与历史 |
+| `tasks/list` | 按 contextId 列任务 |
+| `tasks/cancel` / `CancelTask` | 取消（只置标记，由执行循环在迭代边界退出，不强杀线程） |
+
+```bash
+curl -X POST http://127.0.0.1:3000/a2a -H 'Content-Type: application/json' -d '{
+  "jsonrpc": "2.0", "id": 1, "method": "message/send",
+  "params": {"contextId": "demo", "message": {"messageId": "m1", "role": "user",
+             "parts": [{"kind": "text", "text": "现在几点了？"}]}}
+}'
+```
+
+### 三个实现要点
+
+1. **contextId = ChatSession**：外部 agent 的对话会落进本项目的会话表，
+   所以能在页面上看到并接着聊，不是另开一套存储。
+2. **后台线程执行**：`run_agent` 是同步生成器，一次要跑十几秒。直接放请求线程里
+   会让 `tasks/get` 被堵住，所以每个任务起一个线程，主线程只负责状态与流式输出。
+3. **失败必须可见**：模型报错时任务进入 `failed`，原因写进 `history`，
+   客户端能从 `status.message` 读到，绝不会出现"卡在 working"。
+
 ## 本地 MCP 服务（内置）
 
 仓库里带两个独立的本地 MCP 服务，不需要任何外部依赖：
@@ -343,6 +389,9 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 - API 用量 / 频率限制（当前仅 10 轮迭代上限）
 - 加密密钥独立管理（当前由 Django SECRET_KEY 派生；SECRET_KEY 是仓库里的开发默认值）
 - MCP 自动重连（管理页可手动检测状态，但对话连接失败后不会自动重试）
+- A2A 认证（当前 AgentCard 未声明 securitySchemes，本地服务默认无鉴权）
+- A2A 任务持久化（当前任务存内存，重启丢失；只有对话落了 ChatSession）
+- A2A 推送通知（`pushNotifications: false`，未实现 webhook）
 - MCP 工具审批（外部服务可执行任意本地命令，当前默认信任配置者）
 
 ## 功能架构图（`/architecture`）
@@ -413,6 +462,7 @@ python manage.py test chat.tests.ArchitectureDataTest
 | 改架构图内容 | 只改 `agent_engine/architecture.py`；渲染在 `js/architecture.js` |
 | 改架构图样式 | `css/architecture.css` |
 | 加一套主题 | `app.css` 复制一组变量 + `index.html` 里加一张 `.theme-card` + `settings.js` 的 `THEMES` |
+| 改 A2A 协议行为 | `agent_engine/a2a_protocol.py`（数据结构）与 `chat/a2a_views.py`（端点） |
 | 加一个本地 MCP 服务 | 在 `agent_engine/mcp_servers/` 新建模块，在 `mcp_servers/__init__.py` 登记 |
 
 布局断点：`>1180px` 三栏；`900–1180px` 右栏收成抽屉；`<900px` 左栏也收成抽屉。
