@@ -4,6 +4,10 @@ from . import views
 
 urlpatterns = [
     path("", views.index, name="index"),
+    path("chat/sessions", views.sessions, name="sessions"),
+    path("chat/sessions/create", views.session_create, name="session_create"),
+    path("chat/sessions/rename", views.session_rename, name="session_rename"),
+    path("chat/sessions/delete", views.session_delete, name="session_delete"),
     path("chat/history", views.history, name="history"),
     path("chat/tools", views.tools, name="tools"),
     path("chat/config", views.current_config, name="current_config"),

@@ -1,5 +1,9 @@
 """端点：
 - GET  /                       聊天页面
+- GET  /chat/sessions          会话列表（左栏用）
+- POST /chat/sessions/create   新建空会话
+- POST /chat/sessions/rename   重命名
+- POST /chat/sessions/delete   删除会话及其消息
 - GET  /chat/history?session_id=...   加载某会话的历史消息
 - GET  /chat/tools             可用工具列表（本地 @tool + 外部 MCP，自动合并）
 - GET  /chat/config            当前生效的 LLM 配置（不含 key 明文）
@@ -11,6 +15,7 @@
 - POST /chat/mcp/test          试连一个服务并列出它能提供的工具
 """
 import json
+import uuid
 
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
@@ -23,7 +28,7 @@ from agent_engine.mcp_config import MCPHub, load_file_specs, load_specs
 from agent_engine.tools import build_tools_schema
 
 from .crypto import decrypt_secret, encrypt_secret
-from .models import ChatMessage, LLMConfig, MCPServerConfig
+from .models import ChatMessage, ChatSession, LLMConfig, MCPServerConfig
 
 
 def index(request):
@@ -36,6 +41,88 @@ def history(request):
     return JsonResponse({"messages": messages})
 
 
+# ---------------------------------------------------------------------------
+# 会话管理（左栏会话列表）
+# ---------------------------------------------------------------------------
+
+def _session_dict(session: ChatSession) -> dict:
+    return {
+        "session_id": session.session_id,
+        "title": session.title or session.first_user_text()[:80] or "新对话",
+        "message_count": session.message_count(),
+        # 一轮 = 一条用户消息（内部还有 assistant/tool 消息，直接数会显得很多）
+        "turn_count": ChatMessage.objects.filter(session_id=session.session_id, role="user").count(),
+        "created_at": session.created_at.isoformat(),
+        "updated_at": session.updated_at.isoformat(),
+    }
+
+
+def _json_body(request):
+    """解析 JSON body；空 body 视为 {}，方便"新建会话"这类无参数请求。"""
+    if not request.body:
+        return {}
+    return json.loads(request.body)
+
+
+def sessions(request):
+    """会话列表，最近活跃的在前。"""
+    rows = ChatSession.objects.all()
+    return JsonResponse({"sessions": [_session_dict(s) for s in rows]})
+
+
+# 本地学习项目用 @csrf_exempt 简化；生产环境应改为 token 校验。
+@csrf_exempt
+def session_create(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "仅支持 POST"}, status=405)
+    try:
+        data = _json_body(request)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+
+    title = str(data.get("title", "")).strip()[:80]
+    session = ChatSession.objects.create(session_id=uuid.uuid4().hex, title=title)
+    return JsonResponse({"ok": True, "session": _session_dict(session)})
+
+
+@csrf_exempt
+def session_rename(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "仅支持 POST"}, status=405)
+    try:
+        data = _json_body(request)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+
+    session_id = str(data.get("session_id", "")).strip()
+    title = str(data.get("title", "")).strip()[:80]
+    if not session_id:
+        return JsonResponse({"error": "缺少 session_id"}, status=400)
+
+    updated = ChatSession.objects.filter(session_id=session_id).update(title=title)
+    if not updated:
+        return JsonResponse({"error": "会话不存在"}, status=404)
+    return JsonResponse({"ok": True})
+
+
+@csrf_exempt
+def session_delete(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "仅支持 POST"}, status=405)
+    try:
+        data = _json_body(request)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+
+    session_id = str(data.get("session_id", "")).strip()
+    if not session_id:
+        return JsonResponse({"error": "缺少 session_id"}, status=400)
+
+    ChatSession.objects.filter(session_id=session_id).delete()
+    ChatMessage.objects.filter(session_id=session_id).delete()
+    return JsonResponse({"ok": True})
+
+
 def tools(request):
     """工具列表由装饰器注册表自动生成，新增 @tool 后前端无需改动。
 
@@ -46,7 +133,7 @@ def tools(request):
     if request.GET.get("with_mcp") != "1":
         return JsonResponse({"tools": local, "local_count": len(local), "mcp_count": 0, "mcp_errors": {}})
 
-    hub = MCPHub(timeout=8.0)
+    hub = MCPHub(timeout=15.0)
     try:
         remote = hub.connect_all()
     finally:
@@ -106,10 +193,19 @@ def chat_stream(request):
     except json.JSONDecodeError:
         return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
 
-    session_id = str(data.get("session_id", ""))[:64]
+    session_id = str(data.get("session_id", ""))[:64].strip()
     user_text = str(data.get("message", "")).strip()
     if not user_text:
         return JsonResponse({"error": "message 不能为空"}, status=400)
+    if not session_id:
+        session_id = uuid.uuid4().hex
+
+    # 会话不存在就建一个（兼容旧前端直接带 session_id 过来的情况），
+    # 第一条用户消息自动成为标题
+    session, created = ChatSession.objects.get_or_create(session_id=session_id)
+    if not session.title:
+        session.title = user_text[:80]
+    session.save()  # 触发 updated_at，让会话排到左栏最前面
 
     # LLM 配置存后端数据库（页面设置面板保存），空值项由 run_agent 回退 .env
     db_config = LLMConfig.singleton()
@@ -138,6 +234,11 @@ def chat_stream(request):
                         role=event["message"]["role"],
                         payload=event["message"],
                     )
+                # 最终回答只以 "done" 事件出现，之前没落库，导致刷新后答案消失、
+                # 下一轮对话也看不到上一句回答。这里补存一条 assistant 消息。
+                elif event["type"] == "done" and event.get("content"):
+                    payload = {"role": "assistant", "content": event["content"]}
+                    ChatMessage.objects.create(session_id=session_id, role="assistant", payload=payload)
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         finally:
             # 客户端中途断开（关页面）时生成器被 close()，这里保证后台线程不泄漏

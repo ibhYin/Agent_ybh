@@ -16,6 +16,33 @@ class ChatMessage(models.Model):
         ordering = ["created_at"]
 
 
+class ChatSession(models.Model):
+    """一个会话。消息仍在 ChatMessage 里，本表只存会话级别的元信息。
+
+    为什么单独一张表而不是从消息里推导：会话列表需要标题和排序，
+    空会话（刚点"新对话"还没说话）也必须能出现在左栏里。
+    """
+
+    session_id = models.CharField(max_length=64, unique=True, db_index=True)
+    title = models.CharField(max_length=80, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def message_count(self) -> int:
+        return ChatMessage.objects.filter(session_id=self.session_id).count()
+
+    def first_user_text(self) -> str:
+        """取第一条用户消息作为标题兜底。"""
+        for m in ChatMessage.objects.filter(session_id=self.session_id, role="user").order_by("created_at")[:1]:
+            text = m.payload.get("content") if isinstance(m.payload, dict) else ""
+            if text:
+                return str(text)
+        return ""
+
+
 class LLMConfig(models.Model):
     """LLM 配置（单例表，只存一行）。api_key 加密存储，永不回传前端。"""
 
