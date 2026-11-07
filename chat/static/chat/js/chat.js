@@ -106,6 +106,11 @@ const chat = (() => {
         setStatus(`调用 ${event.name}…`, "busy");
         break;
 
+      case "thought":
+        // 模型在调工具前的思考，展示在右栏，不打断对话流
+        trace.addThought(event.content);
+        break;
+
       case "tool_result":
         trace.finishTool(event.id, event.result);
         setStatus("工具已返回，继续生成…", "busy");

@@ -61,8 +61,8 @@ NODES = [
           "把 tool_start / tool_result 事件渲成时间线，显示参数、返回、耗时与 LOCAL/MCP。",
           files=["chat/static/chat/js/trace.js"],
           symbols=["trace.startTurn", "trace.addTool", "trace.finishTool", "trace.renderHistory"],
-          inputs=["tool_start", "tool_result", "done 事件"],
-          outputs=["本轮工具数 / MCP 数 / 耗时"]),
+          inputs=["thought", "tool_start", "tool_result", "done 事件"],
+          outputs=["本轮工具数 / MCP 数 / 耗时 / 思考块"]),
     _node("settings-ui", "ui", "设置抽屉", "LLM / 外观 / 工具",
           "保存 LLM 配置、切换主题、查看工具 schema；MCP 配置的完整管理在独立页。",
           files=["chat/static/chat/js/settings.js"],
@@ -122,13 +122,14 @@ NODES = [
           notes="db.sqlite3 被 .gitignore 排除，克隆后需 migrate 生成。"),
 
     # ---------------- agent_engine ----------------
-    _node("agent-loop", "core", "Agentic Loop", "run_agent 同步生成器",
-          "调 LLM → 判断是否请求工具 → 执行 → 回填 role=tool → 再调，最多 10 轮。",
+    _node("agent-loop", "core", "Agentic Loop（ReAct）", "run_agent 同步生成器",
+          "调 LLM → 显式思考 → 判断是否请求工具 → 执行 → 回填 role=tool → 再调，最多 10 轮。",
           files=["agent_engine/agent.py"],
-          symbols=["run_agent", "_run_mcp_tool", "SYSTEM_PROMPT"],
+          symbols=["run_agent", "_run_mcp_tool", "_extract_thought", "SYSTEM_PROMPT"],
           inputs=["消息历史", "工具 schema", "LLM 配置"],
-          outputs=["text_delta / tool_start / tool_result / done 事件"],
-          notes="同步生成器是核心约束；MCP 客户端为此做了同步桥接。"),
+          outputs=["thought / text_delta / tool_start / tool_result / done 事件"],
+          notes="ReAct 的 Thought/Action/Observation：思考优先读 reasoning_content，"
+                "没有则解析 Thought: 前缀；同步生成器是核心约束。"),
     _node("tools-registry", "core", "工具注册表", "@tool + schema 自动生成",
           "一份注册表同时服务 LLM、页面工具列表与对外 MCP 服务。",
           files=["agent_engine/tools.py"],
@@ -310,7 +311,7 @@ FEATURES = [
         "summary": "工具定义只写一次，三种消费者共用。",
         "items": [
             {"text": "@tool 注册 + schema 从签名自动生成", "nodes": ["tools-registry", "agent-loop"]},
-            {"text": "右栏时间线：参数、返回、LOCAL/MCP、耗时", "nodes": ["trace-ui", "agent-loop"]},
+            {"text": "右栏时间线：思考、参数、返回、LOCAL/MCP、耗时", "nodes": ["trace-ui", "agent-loop"]},
             {"text": "新增工具无需改服务端与前端", "nodes": ["tools-registry", "mcp-server"]},
         ],
     },
@@ -396,8 +397,9 @@ FLOW = [
         "nodes": ["agent-loop", "llm", "config"],
     },
     {
-        "title": "模型决定",
-        "detail": "模型返回文本或 tool_calls；本地工具来自注册表，MCP 工具来自 MCPHub。",
+        "title": "思考与决定",
+        "detail": "模型先思考（reasoning_content 或 Thought: 前缀），再决定调用哪个工具；"
+                  "思考作为 thought 事件进右栏。",
         "nodes": ["agent-loop", "tools-registry", "mcp-hub"],
     },
     {

@@ -166,6 +166,36 @@ const trace = (() => {
     return step;
   }
 
+  function addThought(text, { historical = false } = {}) {
+    // 思考块：插在工具步骤之前，展示模型"为什么调这个工具"。
+    // 默认折叠，避免右栏被思考文字刷屏；用户点开才看。
+    if (!text) return;
+    if (!current) startTurn("");
+
+    const root = ui.el("div", "thought" + (historical ? "" : ""));
+    const head = ui.el("button", "thought-head");
+    head.type = "button";
+
+    head.appendChild(ui.el("span", "thought-dot"));
+    head.appendChild(ui.el("span", "thought-label", "思考"));
+    const preview = ui.el("span", "thought-preview", text);
+    preview.title = text;
+    head.appendChild(preview);
+
+    const chevron = ui.el("span", "step-chevron");
+    chevron.innerHTML = ui.icon("chevron");
+    head.appendChild(chevron);
+
+    const body = ui.el("div", "thought-body");
+    body.appendChild(ui.el("div", "thought-text", text));
+
+    root.append(head, body);
+    head.addEventListener("click", () => root.classList.toggle("open"));
+
+    current.steps.appendChild(root);
+    scrollBottom();
+  }
+
   function finishTool(id, result, { historical = false } = {}) {
     const step = toolSteps.get(id);
     if (!step) return;
@@ -262,6 +292,10 @@ const trace = (() => {
         finalizeHistoricalTurn();  // 上一轮到此为止
         startTurn(m.content || "", { historical: true });
       } else if (m.role === "assistant") {
+        // 思考：历史消息里存了 reasoning 私有字段
+        if (m.reasoning) {
+          addThought(m.reasoning, { historical: true });
+        }
         for (const tc of m.tool_calls || []) {
           const fn = tc.function || {};
           addTool({
@@ -287,5 +321,5 @@ const trace = (() => {
     updateStats();
   }
 
-  return { init, startTurn, addTool, finishTool, addError, endTurn, reset, renderHistory };
+  return { init, startTurn, addTool, addThought, finishTool, addError, endTurn, reset, renderHistory };
 })();

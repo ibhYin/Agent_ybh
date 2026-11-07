@@ -957,6 +957,61 @@ select option { background: var(--panel); color: var(--text); }
 .turn-foot .turn-sum { flex: 1; }
 .turn-foot .turn-time { color: var(--text-2); }
 
+/* 思考块（ReAct 的 Thought） */
+
+.thought {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--violet) 6%, transparent);
+  overflow: hidden;
+}
+.thought-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.thought-head:hover { background: color-mix(in srgb, var(--violet) 10%, transparent); }
+.thought-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--violet);
+  flex: 0 0 auto;
+}
+.thought-label {
+  color: var(--violet);
+  font-size: 9.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  flex: 0 0 auto;
+}
+.thought-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.thought-body { display: none; padding: 0 9px 9px 22px; }
+.thought.open .thought-body { display: block; }
+.thought.open .step-chevron { transform: rotate(90deg); }
+.thought-text {
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* 单个工具步骤 */
 
 .step {
