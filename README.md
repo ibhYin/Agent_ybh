@@ -13,6 +13,7 @@
 - 本地 MCP 服务：内置**文件系统**与 **SQLite 只读**两个独立服务，独立页面 `/mcp` 管理状态、工具、启停
 - 架构图：`/architecture` 交互页（分层 / 功能 / 数据流 / MCP 双向 / A2A），节点可点看代码位置
 - A2A：作为 **Agent2Agent 服务端**对外协作（`/agent-card.json` + `/a2a`），任务有生命周期、可多轮、可取消
+- Skill：**渐进式披露**的操作手册，只把 `name+description` 进上下文，正文由 `load_skill` 按需加载
 - 会话：sqlite 持久化，支持多会话（切换 / 重命名 / 删除），标题自动取第一条消息
 - 执行过程：工具名、参数、返回与耗时在右栏时间线实时展开，区分 LOCAL / MCP
 - 安全：工具沙箱（workspace/）、注入防护、API Key 加密存储
@@ -63,6 +64,8 @@ agent_engine/          # 智能体核心（不依赖 Django，可单独复用）
 ├── mcp_servers/       # 内置本地 MCP 服务（各自独立进程）
 │   ├── fs.py          #   文件系统：list / read / write / search（沙箱根目录）
 │   └── sqlite.py      #   SQLite 只读：list_tables / describe_table / query
+├── skills.py          # Skill 库：发现 + 摘要注入 + load_skill 工具
+└── skills/            # 技能文档（每个目录一个 SKILL.md）
 ├── tests_mcp_server.py  # 服务端测试：stdio 传输（in-process + 真实子进程）
 ├── tests_mcp_sse.py   # 服务端测试：SSE 传输（真起 uvicorn + 并发 + Host/Origin 校验）
 └── tests_mcp_client.py  # 客户端测试：连接生命周期、错误信息、配置合并
@@ -268,6 +271,51 @@ python -m agent_engine.mcp_server --transport sse --host 0.0.0.0  # 对外监听
 python -m unittest agent_engine.tests_mcp_sse -v
 ```
 
+## Agent Skill：按需加载的操作手册
+
+MCP 回答「agent 能不能做这件事」，Skill 回答「这件事该怎么做」。两者互补。
+
+### 机制（渐进式披露）
+
+每个技能是一个 `skills/<slug>/SKILL.md`，带 frontmatter：
+
+```markdown
+---
+name: sqlite-query
+description: 查询本地 SQLite 时使用；表结构探查与字段陷阱
+when: 用户问数据、统计、报表
+---
+# 正文（只有被加载时才进上下文）
+```
+
+运行时只把 **name + description** 注入 system prompt（三个技能合计几百字符），
+正文不进上下文。模型判断任务相关时，调用内置工具 `load_skill(name)` 读取全文。
+
+```bash
+ls skills/        # 当前有 sqlite-query / filesystem / answer-style
+```
+
+### 为什么这样设计
+
+- **token**：20 个技能的清单比 20 份全文小两个量级
+- **聚焦**：正文只在相关时才出现，不干扰其他任务
+- **零新机制**：`load_skill` 就是一个 `@tool`，复用已有的 tool call 循环与前端展示
+- **纯文档**：Skill 不执行代码，不引入代码执行面（详见下文）
+
+### 加一个技能
+
+`skills/<目录>/SKILL.md` 写 frontmatter + 正文即可，重启后生效（目录每次请求重扫）。
+description 要写「什么时候用」，不是「是什么」——模型只靠它判断要不要加载。
+
+### 与 MCP 的边界
+
+| | MCP | Agent Skill |
+|---|---|---|
+| 提供 | 能调用的动作 | 怎么做的知识 |
+| 形态 | 函数 + schema | Markdown 文档 |
+| 加载 | 工具的 schema 常驻 | 正文按需加载 |
+| 安全面 | 工具沙箱 | 纯文本，无代码执行 |
+
 ## A2A：把 agent 本身当服务（Agent2Agent）
 
 MCP 是「agent 用工具」，A2A 是「agent 找 agent」。本项目两边都做了：
@@ -422,6 +470,7 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 - A2A 认证（当前 AgentCard 未声明 securitySchemes，本地服务默认无鉴权）
 - A2A 任务持久化（当前任务存内存，重启丢失；只有对话落了 ChatSession）
 - A2A 推送通知（`pushNotifications: false`，未实现 webhook）
+- Skill 的可执行脚本（当前纯文档，避免引入任意代码执行面）
 - MCP 工具审批（外部服务可执行任意本地命令，当前默认信任配置者）
 
 ## 功能架构图（`/architecture`）
@@ -493,6 +542,7 @@ python manage.py test chat.tests.ArchitectureDataTest
 | 改架构图样式 | `css/architecture.css` |
 | 加一套主题 | `app.css` 复制一组变量 + `index.html` 里加一张 `.theme-card` + `settings.js` 的 `THEMES` |
 | 改 A2A 协议行为 | `agent_engine/a2a_protocol.py`（数据结构）与 `chat/a2a_views.py`（端点） |
+| 加一个 Skill | `skills/<目录>/SKILL.md`，无需改代码 |
 | 加一个本地 MCP 服务 | 在 `agent_engine/mcp_servers/` 新建模块，在 `mcp_servers/__init__.py` 登记 |
 
 布局断点：`>1180px` 三栏；`900–1180px` 右栏收成抽屉；`<900px` 左栏也收成抽屉。

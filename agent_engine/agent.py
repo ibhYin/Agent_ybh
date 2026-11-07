@@ -14,6 +14,7 @@ import json
 from openai import OpenAI
 
 from . import config
+from .skills import SkillLibrary, load_skill_tool
 from .tools import TOOL_REGISTRY, build_tools_schema, execute_tool
 
 MAX_ITERATIONS = 10
@@ -25,6 +26,21 @@ SYSTEM_PROMPT = """你是运行在智能体循环中的助手，通过工具帮�
 2. 绝不读取、输出或猜测 API 密钥、.env 配置文件、数据库等敏感内容。
 3. 工具由系统自动执行，你只需决定是否调用、调用哪个、传什么参数；不要尝试构造工具之外的任何操作。
 4. 工具返回错误时，向用户说明并尝试用合法方式纠正。"""
+
+
+# 技能清单与 load_skill 工具只在进程内初始化一次：
+# 每次请求都重新扫描目录会让 system prompt 抖动，也让工具 schema 不稳定。
+_SKILL_LIBRARY = SkillLibrary()
+_SKILLS_READY = False
+
+
+def _ensure_skills() -> str:
+    """注册 load_skill 工具并返回要注入的清单块（没有技能时返回空串）。"""
+    global _SKILLS_READY
+    if not _SKILLS_READY:
+        load_skill_tool(_SKILL_LIBRARY)
+        _SKILLS_READY = True
+    return _SKILL_LIBRARY.prompt_block()
 
 
 def run_agent(messages: list[dict], llm_config: dict | None = None, mcp_hub=None):
@@ -48,14 +64,24 @@ def run_agent(messages: list[dict], llm_config: dict | None = None, mcp_hub=None
         return
 
     client = _make_client(cfg["base_url"], cfg["api_key"])
-    # 本地工具（@tool 注册表）+ 外部 MCP 工具合并成一份 schema
+
+    # 技能清单：只注入 name + description，正文由模型按需调用 load_skill 读取。
+    # 这就是渐进式披露——20 个技能也只占几百字符。
+    # 必须在 build_tools_schema() 之前：load_skill 工具要在这里注册，
+    # 否则它虽然能执行，却不会出现在模型可见的工具清单里。
+    skill_block = _ensure_skills()
+    system_prompt = SYSTEM_PROMPT
+    if skill_block:
+        system_prompt = f"{SYSTEM_PROMPT}\n\n{skill_block}"
+
+    # 本地工具（@tool 注册表 + load_skill）+ 外部 MCP 工具合并成一份 schema
     tools_schema = build_tools_schema()
     if mcp_hub is not None:
         tools_schema = tools_schema + mcp_hub.connect_all()
 
     # 注入防护：system 提示只加入本次请求的本地副本（+ 生成新列表），
     # 不写回调用方的消息历史、不落库
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+    messages = [{"role": "system", "content": system_prompt}] + messages
 
     for iteration in range(1, MAX_ITERATIONS + 1):
         # ---------- 第 1 步：调用 LLM（流式） ----------
