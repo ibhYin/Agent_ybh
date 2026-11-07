@@ -132,24 +132,34 @@ def run_agent(messages: list[dict], llm_config: dict | None = None, mcp_hub=None
     yield {"type": "error", "message": f"达到最大迭代次数（{MAX_ITERATIONS} 轮），自动停止"}
 
 
-def _make_client(base_url: str, api_key: str):
-    """构造 OpenAI 客户端，并绕开一个会让报错信息面目全非的环境问题。
+def _http_client():
+    """按 openai 的依赖关系选 HTTP 客户端，并关掉环境变量继承。
 
-    httpx 默认 trust_env=True，会读 HTTP(S)_PROXY 与 NO_PROXY。
-    本机若把 IPv6 回环写成 `[::1]`（NO_PROXY 里很常见），httpx 解析端口会抛
-    `InvalidURL: Invalid port: ':1]'`——但 openai SDK 会把它包装成别的东西，
-    实测最终显示成"接口地址错误（404）"，把真正原因（配额/网络）彻底淹没。
+    openai 2.x 依赖 httpx，3.x 依赖 httpx2，两者互不兼容（传错直接 TypeError）。
+    本机两种情况都可能出现：conda 里是 2.x，干净 venv 里装到的是 3.x。
+    所以先读 openai 自己声明的依赖（importlib.metadata），再决定 import 哪个，
+    而不是"先试 httpx2 再回退"——因为 httpx2 也可能作为别家依赖装进来
+    （本项目里 mcp 就带它），顺序猜错就会拿到不匹配的那个。
 
-    这里显式传一个 trust_env=False 的 http_client：代理如需生效，
-    请通过 base_url 指向代理，而不是依赖环境变量。
+    为什么不用默认值（trust_env=True）：httpx 会读 HTTP(S)_PROXY / NO_PROXY，
+    本机若把 IPv6 回环写成 `[::1]`（NO_PROXY 里很常见），解析端口会抛 InvalidURL，
+    被 SDK 包装后最终显示成"接口地址错误（404）"，把真正原因彻底盖住。
     """
-    import httpx
+    import importlib.metadata as metadata
 
-    return OpenAI(
-        base_url=base_url,
-        api_key=api_key,
-        http_client=httpx.Client(trust_env=False, timeout=httpx.Timeout(120.0, connect=10.0)),
-    )
+    requires = " ".join(metadata.requires("openai") or [])
+    prefers_httpx2 = "httpx2" in requires
+
+    if prefers_httpx2:
+        import httpx2 as _http
+    else:
+        import httpx as _http
+
+    return _http.Client(trust_env=False, timeout=_http.Timeout(120.0, connect=10.0))
+
+
+def _make_client(base_url: str, api_key: str):
+    return OpenAI(base_url=base_url, api_key=api_key, http_client=_http_client())
 
 
 def _run_mcp_tool(mcp_hub, name: str, arguments_json: str) -> str:

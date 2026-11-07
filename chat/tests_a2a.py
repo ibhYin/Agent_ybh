@@ -198,6 +198,9 @@ class TaskRunnerTest(unittest.TestCase):
         self.assertLessEqual(len(store.list()), 3)
 
 
+FAKE_LLM_CONFIG = {"base_url": "http://fake.local/v1", "api_key": "test-key", "model": "fake-model"}
+
+
 class A2AHttpTest(TransactionTestCase):
     """/agent-card.json 与 /a2a 的 HTTP 行为。
 
@@ -205,6 +208,20 @@ class A2AHttpTest(TransactionTestCase):
     而 TestCase 把每个用例包在一个未提交的事务里，后台线程用的是另一条连接，
     看不到这些数据，也写不进去（表现为 "database table is locked" 与查不到记录）。
     """
+
+    def setUp(self):
+        # A2A 的模型配置来自数据库；测试环境没有 .env，必须显式给一份，
+        # 否则任务会在"未配置 API_KEY"处失败，掩盖真正要验证的东西。
+        from chat import a2a_views
+
+        self._patcher = patch.object(a2a_views, "_llm_config", return_value=FAKE_LLM_CONFIG)
+        self._patcher.start()
+        self.addCleanup(self._patcher.stop)
+
+        # runner 按会话缓存并按需构造，清空以免复用带了旧配置的实例
+        a2a_views._RUNNERS.clear()
+        self.addCleanup(a2a_views._RUNNERS.clear)
+        self.addCleanup(a2a_views.STORE.clear)
 
     def _rpc(self, method, params=None, request_id=1):
         return self.client.post(
