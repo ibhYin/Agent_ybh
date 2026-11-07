@@ -8,6 +8,7 @@
 - 工具：设置面板实时查看可用工具列表（@tool 注册后自动出现）
 - MCP 服务端：同一份工具注册表能作为 **MCP 服务**被 Claude Desktop / Cursor 直接调用，支持 stdio 与 SSE 两种传输（`python -m agent_engine.mcp_server [--transport sse]`）
 - MCP 客户端：本项目的 agent 也能**反过来调用外部 MCP 服务**，在【设置 → MCP 服务】里增删，或写根目录 `mcp.json`
+- 本地 MCP 服务：内置**文件系统**与 **SQLite 只读**两个独立服务，独立页面 `/mcp` 管理状态、工具、启停
 - 会话：sqlite 持久化，支持多会话（切换 / 重命名 / 删除），标题自动取第一条消息
 - 执行过程：工具名、参数、返回与耗时在右栏时间线实时展开，区分 LOCAL / MCP
 - 安全：工具沙箱（workspace/）、注入防护、API Key 加密存储
@@ -52,9 +53,12 @@ agent_engine/          # 智能体核心（不依赖 Django，可单独复用）
 ├── tools.py           # 工具注册机制 + 4 个示例工具（@tool 装饰器）
 ├── agent.py           # Agentic Loop 主循环（生成器，逐步 yield 事件）
 ├── config.py          # 读取 .env：BASE_URL / API_KEY / MODEL
-├── mcp_server.py      # 对外提供工具：MCP 服务端（stdio + SSE 两种传输）
+├── mcp_server.py      # 对外提供工具：MCP 服务端（stdio + SSE，可复用给本地服务）
 ├── mcp_client.py      # 调用外部工具：MCP 客户端（同步/异步桥接，连接常驻）
 ├── mcp_config.py      # 外部服务来源合并（mcp.json + 数据库）+ MCPHub 路由
+├── mcp_servers/       # 内置本地 MCP 服务（各自独立进程）
+│   ├── fs.py          #   文件系统：list / read / write / search（沙箱根目录）
+│   └── sqlite.py      #   SQLite 只读：list_tables / describe_table / query
 ├── tests_mcp_server.py  # 服务端测试：stdio 传输（in-process + 真实子进程）
 ├── tests_mcp_sse.py   # 服务端测试：SSE 传输（真起 uvicorn + 并发 + Host/Origin 校验）
 └── tests_mcp_client.py  # 客户端测试：连接生命周期、错误信息、配置合并
@@ -232,6 +236,33 @@ python -m agent_engine.mcp_server --transport sse --host 0.0.0.0  # 对外监听
 python -m unittest agent_engine.tests_mcp_sse -v
 ```
 
+## 本地 MCP 服务（内置）
+
+仓库里带两个独立的本地 MCP 服务，不需要任何外部依赖：
+
+| 服务 | 工具 | 边界 |
+|---|---|---|
+| `agent_engine/mcp_servers.fs` | `list_files` / `read_text` / `write_text` / `search_text` | 只在 `MCP_FS_ROOT`（默认项目 `workspace/`）内；绝对路径与 `../` 越界被拒 |
+| `agent_engine.mcp_servers.sqlite` | `list_tables` / `describe_table` / `query` | `mode=ro` + authorizer 双重只读；写操作、`ATTACH`、`PRAGMA writable_schema` 全部 `not authorized` |
+
+两者都是标准 MCP 服务，可以用 stdio 被本项目的 agent 调用，也可以单独跑：
+
+```bash
+python -m agent_engine.mcp_servers.fs          # 默认根 workspace/
+MCP_FS_ROOT=/tmp/docs python -m agent_engine.mcp_servers.fs
+
+python -m agent_engine.mcp_servers.sqlite      # 默认找 askdb 的样例库
+MCP_SQLITE_DB=/path/to.db python -m agent_engine.mcp_servers.sqlite
+```
+
+**管理页**：打开 `/mcp`（聊天页左栏也有入口）。卡片展示每个服务的连接状态、
+可用工具、耗时与来源（数据库 / `mcp.json`），支持：
+
+- 全部检测 / 单个测试（会带上已保存的 env，不回显值）
+- 启停开关（数据库里的服务；`mcp.json` 的只读）
+- 添加/编辑/删除；内置服务一键添加
+- 状态检测对单个服务失败只记录，不影响其他服务
+
 ## 让 agent 调用外部 MCP 服务
 
 上面那节是"本项目**对外**提供工具"，这节反过来：本项目**使用**别人的 MCP 工具。
@@ -310,7 +341,7 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 - CSRF 防护（当前 `@csrf_exempt` 仅为本地学习简化）
 - API 用量 / 频率限制（当前仅 10 轮迭代上限）
 - 加密密钥独立管理（当前由 Django SECRET_KEY 派生；SECRET_KEY 是仓库里的开发默认值）
-- MCP 服务健康检查与重连（当前连接失败只记录，不自动重试）
+- MCP 自动重连（管理页可手动检测状态，但对话连接失败后不会自动重试）
 - MCP 工具审批（外部服务可执行任意本地命令，当前默认信任配置者）
 
 ## 界面说明（给要改前端的人）
@@ -326,5 +357,7 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 | 改会话列表行为 | `js/sessions.js` |
 | 改发送与 SSE 事件映射 | `js/chat.js`（`handleEvent`） |
 | 改设置面板 | `js/settings.js` + `index.html` 的抽屉部分 |
+| 改 MCP 管理页 | `mcp.html` + `js/mcp.js` + `css/mcp.css` |
+| 加一个本地 MCP 服务 | 在 `agent_engine/mcp_servers/` 新建模块，在 `mcp_servers/__init__.py` 登记 |
 
 布局断点：`>1180px` 三栏；`900–1180px` 右栏收成抽屉；`<900px` 左栏也收成抽屉。

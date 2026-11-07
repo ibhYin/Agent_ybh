@@ -61,6 +61,23 @@ const api = {
   mcpTest: (server) =>
     requestJSON("/chat/mcp/test", { method: "POST", body: JSON.stringify(server) }),
 
+  // ---------- MCP 管理页 ----------
+  mcpBuiltin: () => requestJSON("/chat/mcp/builtin"),
+
+  mcpStatus: () => requestJSON("/chat/mcp/status"),
+
+  mcpToggle: (name, enabled) =>
+    requestJSON("/chat/mcp/toggle", {
+      method: "POST",
+      body: JSON.stringify({ name, enabled }),
+    }),
+
+  mcpTestStored: (name) =>
+    requestJSON("/chat/mcp/test-stored", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+
   /**
    * 发送消息并消费 SSE 流。
    * 用 fetch + ReadableStream 而不是 EventSource：EventSource 只能 GET，

@@ -56,6 +56,10 @@
         <span class="chip" data-chip="llm"><i></i><span class="chip-label">LLM 检查中</span></span>
         <span class="chip" data-chip="mcp"><i></i><span class="chip-label">MCP 检查中</span></span>
       </div>
+      <a href="/mcp" target="_blank" class="btn ghost block">
+        <svg class="ico"><use href="#i-server"/></svg>
+        <span>MCP 服务</span>
+      </a>
       <button id="settings-btn" class="btn ghost block">
         <svg class="ico"><use href="#i-settings"/></svg>
         <span>设置</span>
@@ -194,7 +198,8 @@
     <section class="tab-panel" data-panel="mcp">
       <div class="actions" style="margin-top:0">
         <button id="mcp-add" class="btn sm">添加服务</button>
-        <span class="hint" style="margin:0">也可写项目根目录 <kbd>mcp.json</kbd>（与 Claude Desktop 格式兼容）</span>
+        <a href="/mcp" target="_blank" class="btn ghost sm">完整管理页 ↗</a>
+        <span class="hint" style="margin:0">也可写项目根目录 <kbd>mcp.json</kbd></span>
       </div>
 
       <div id="server-list" class="server-list"></div>

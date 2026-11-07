@@ -25,6 +25,7 @@ from agent_engine import config
 from agent_engine.agent import run_agent
 from agent_engine.mcp_client import MCPClient, MCPServerSpec
 from agent_engine.mcp_config import MCPHub, load_file_specs, load_specs
+from agent_engine.mcp_servers import builtin_specs
 from agent_engine.tools import build_tools_schema
 
 from .crypto import decrypt_secret, encrypt_secret
@@ -33,6 +34,11 @@ from .models import ChatMessage, ChatSession, LLMConfig, MCPServerConfig
 
 def index(request):
     return render(request, "chat/index.html")
+
+
+def mcp_page(request):
+    """独立的 MCP 管理页：比设置里的表单更适合看状态与工具清单。"""
+    return render(request, "chat/mcp.html")
 
 
 def history(request):
@@ -294,16 +300,22 @@ def mcp_save(request):
     if error:
         return JsonResponse({"error": error}, status=400)
 
+    existing = MCPServerConfig.objects.filter(name=spec.name).first()
+    # 面板回显不回传 env 值（可能含密钥）；表单留空表示"保持原样"，不是清空
+    env = data.get("env") if "env" in data else (existing.env if existing else {})
+    # 同理：编辑已停用的服务不应悄悄把它重新启用
+    enabled = data.get("enabled", existing.enabled if existing else True)
+
     row, created = MCPServerConfig.objects.update_or_create(
         name=spec.name,
         defaults={
             "transport": spec.transport,
             "command": spec.command,
             "args": spec.args,
-            "env": spec.env,
+            "env": env if isinstance(env, dict) else {},
             "cwd": spec.cwd or "",
             "url": spec.url,
-            "enabled": spec.enabled,
+            "enabled": bool(enabled),
         },
     )
     return JsonResponse({"ok": True, "created": created, "name": row.name})
@@ -355,3 +367,123 @@ def mcp_test(request):
         return JsonResponse({"ok": False, "error": f"{type(e).__name__}: {e}"})
     finally:
         client.close()
+
+
+# ---------------------------------------------------------------------------
+# MCP 管理页专用接口
+# ---------------------------------------------------------------------------
+
+def mcp_builtin(request):
+    """内置本地 MCP 目录（文件系统 / SQLite），并标注是否已经添加过。"""
+    installed = set(MCPServerConfig.objects.values_list("name", flat=True))
+    installed |= {s.name for s in load_file_specs()}
+    items = []
+    for spec in builtin_specs():
+        spec["installed"] = spec["name"] in installed
+        items.append(spec)
+    return JsonResponse({"builtins": items})
+
+
+@csrf_exempt
+def mcp_toggle(request):
+    """启用 / 停用一个数据库里的服务；mcp.json 的只读，不能从页面停用。"""
+    if request.method != "POST":
+        return JsonResponse({"error": "仅支持 POST"}, status=405)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+
+    name = str(data.get("name", "")).strip()
+    enabled = bool(data.get("enabled", True))
+    row = MCPServerConfig.objects.filter(name=name).first()
+    if row is None:
+        return JsonResponse({"error": f"数据库里没有服务 {name}（mcp.json 里的服务请直接改文件）"}, status=404)
+
+    row.enabled = enabled
+    row.save(update_fields=["enabled"])
+    return JsonResponse({"ok": True, "name": name, "enabled": enabled})
+
+
+@csrf_exempt
+def mcp_test_stored(request):
+    """按名字测试一个已保存的服务（会带上数据库里的 env，不回传 env 本身）。"""
+    if request.method != "POST":
+        return JsonResponse({"error": "仅支持 POST"}, status=405)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+
+    name = str(data.get("name", "")).strip()
+    spec = next((s for s in load_specs() if s.name == name), None)
+    if spec is None:
+        return JsonResponse({"ok": False, "error": "服务不存在或已停用"}, status=404)
+
+    client = MCPClient(spec, timeout=15.0)
+    try:
+        remote = client.connect()
+        return JsonResponse({
+            "ok": True,
+            "tools": [
+                {
+                    "name": t["_mcp"]["tool"],
+                    "description": t["function"]["description"],
+                    "parameters": t["function"]["parameters"],
+                }
+                for t in remote
+            ],
+        })
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)})
+    finally:
+        client.close()
+
+
+def mcp_status(request):
+    """逐个连接已启用的服务，返回状态、耗时与工具清单（管理页初次加载用）。
+
+    串行连接：本地 2–3 个服务，每个约 1–2 秒；并发化会引入线程池与调试成本，
+    暂时不值得。单个服务失败只记录，不影响其他服务。
+    """
+    import time
+
+    db_names = set(MCPServerConfig.objects.values_list("name", flat=True))
+    file_names = {s.name for s in load_file_specs()}
+
+    servers = []
+    for spec in load_specs():
+        started = time.perf_counter()
+        client = MCPClient(spec, timeout=15.0)
+        item = {
+            "name": spec.name,
+            "transport": spec.transport,
+            "command": spec.command,
+            "args": spec.args,
+            "url": spec.url,
+            "cwd": spec.cwd or "",
+            "source": "database" if spec.name in db_names else "file" if spec.name in file_names else "builtin",
+            "enabled": True,
+            "ok": False,
+            "tools": [],
+            "error": "",
+        }
+        try:
+            tools = client.connect()
+            item["ok"] = True
+            item["tools"] = [
+                {
+                    "name": t["_mcp"]["tool"],
+                    "description": t["function"]["description"],
+                    "parameters": t["function"]["parameters"],
+                }
+                for t in tools
+            ]
+        except Exception as e:
+            item["error"] = str(e)
+        finally:
+            client.close()
+            item["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        servers.append(item)
+
+    return JsonResponse({"servers": servers})

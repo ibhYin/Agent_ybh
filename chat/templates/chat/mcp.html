@@ -1,0 +1,140 @@
+{% load static %}<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP 服务 · 智能体 MVP</title>
+<link rel="stylesheet" href="{% static 'chat/css/app.css' %}">
+<link rel="stylesheet" href="{% static 'chat/css/mcp.css' %}">
+</head>
+<body class="mcp-body">
+
+<svg class="svg-defs" aria-hidden="true">
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><circle cx="8" cy="7" r="1"/><circle cx="8" cy="17" r="1"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6l-12 12"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6h5"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M20 12H5M11 6l-6 6 6 6"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4-10 10v4z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></symbol>
+</svg>
+
+<div class="mcp-page">
+
+  <header class="mcp-header">
+    <a href="/" class="btn ghost sm">
+      <svg class="ico"><use href="#i-arrow-left"/></svg> 返回对话
+    </a>
+    <div class="mcp-title">
+      <h1><svg class="ico"><use href="#i-server"/></svg> MCP 服务</h1>
+      <p>本地服务的连接状态、可用工具与启停；改动即时生效，无需重启</p>
+    </div>
+    <div class="mcp-actions">
+      <button id="refresh-all" class="btn ghost">
+        <svg class="ico"><use href="#i-activity"/></svg> 全部检测
+      </button>
+      <button id="new-server" class="btn">
+        <svg class="ico"><use href="#i-plus"/></svg> 新建服务
+      </button>
+    </div>
+  </header>
+
+  <section class="mcp-stats">
+    <div class="mstat"><em id="stat-servers">0</em><span>已配置</span></div>
+    <div class="mstat"><em id="stat-online" class="ok">0</em><span>已连接</span></div>
+    <div class="mstat"><em id="stat-tools">0</em><span>可用工具</span></div>
+    <div class="mstat"><em id="stat-time">—</em><span>上次检测</span></div>
+  </section>
+
+  <main class="mcp-main">
+    <section>
+      <div class="section-head">
+        <h2>已配置服务</h2>
+        <span id="server-note" class="section-note">加载中…</span>
+      </div>
+      <div id="server-grid" class="mcp-grid"></div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>内置服务</h2>
+        <span class="section-note">随仓库提供，点添加即可写入配置</span>
+      </div>
+      <div id="builtin-grid" class="mcp-grid"></div>
+    </section>
+  </main>
+</div>
+
+<div id="drawer-scrim" class="drawer-scrim hidden"></div>
+
+<aside id="server-drawer" class="server-drawer hidden">
+  <div class="drawer-head">
+    <h2 id="drawer-title">添加服务</h2>
+    <button id="close-drawer" class="icon-btn" aria-label="关闭">
+      <svg class="ico"><use href="#i-close"/></svg>
+    </button>
+  </div>
+
+  <div class="drawer-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="f-name">服务名（工具名前缀，唯一）</label>
+        <input id="f-name" placeholder="filesystem">
+      </div>
+      <div class="field">
+        <label for="f-transport">传输方式</label>
+        <select id="f-transport">
+          <option value="stdio">stdio（本地进程）</option>
+          <option value="sse">SSE（HTTP 长连接）</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="f-stdio-fields">
+      <div class="field">
+        <label for="f-command">启动命令</label>
+        <input id="f-command" placeholder="/opt/anaconda3/envs/langchain/bin/python">
+      </div>
+      <div class="field">
+        <label for="f-args">参数（一行一个）</label>
+        <textarea id="f-args" rows="3" placeholder="-m&#10;agent_engine.mcp_servers.fs"></textarea>
+      </div>
+      <div class="field">
+        <label for="f-cwd">工作目录（可选）</label>
+        <input id="f-cwd" placeholder="/absolute/path">
+      </div>
+    </div>
+
+    <div id="f-sse-fields" style="display:none">
+      <div class="field">
+        <label for="f-url">SSE 端点 URL</label>
+        <input id="f-url" placeholder="http://127.0.0.1:8031/sse">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="f-env">环境变量（KEY=VALUE，一行一个）</label>
+      <textarea id="f-env" rows="3" placeholder="MCP_FS_ROOT=/some/dir"></textarea>
+      <p id="env-hint" class="hint"></p>
+    </div>
+
+    <div class="actions">
+      <button id="save-server" class="btn">保存</button>
+      <button id="reset-form" class="btn ghost">清空</button>
+    </div>
+    <div id="form-status" class="status-line"></div>
+
+    <p class="hint">
+      工具会以 <kbd>服务名__工具名</kbd> 出现在模型可用的工具列表。
+      编辑时环境变量留空表示保留原值（值不会回显）。
+    </p>
+  </div>
+</aside>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="{% static 'chat/js/api.js' %}"></script>
+<script src="{% static 'chat/js/mcp.js' %}"></script>
+</body>
+</html>
