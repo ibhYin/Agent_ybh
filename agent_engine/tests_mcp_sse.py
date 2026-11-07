@@ -15,7 +15,9 @@ import threading
 import time
 import unittest
 
-import httpx
+# 用 httpx2 而不是 httpx：mcp 2.x 依赖的就是 httpx2，用它可以少一个直接依赖。
+# （首次在干净 venv 里跑 CI 时才暴露出来：本地 conda 恰好装了 httpx，掩盖了这个遗漏。）
+import httpx2 as httpx
 import uvicorn
 from mcp import Client
 from mcp.client.sse import sse_client

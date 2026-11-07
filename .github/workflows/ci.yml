@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 与 askdb 保持一致。项目自身要求 3.10+，requirements 里 mcp 也要求 >=3.10
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      # 没有 .env 也必须能启动：CI 里永远不会有你的密钥文件，
+      # 这条顺带保证「配置缺失」走的是可读的错误提示，而不是 import 期崩溃
+      - name: Django 系统检查（无 .env 环境）
+        run: python manage.py check
+
+      # 一次跑完 stdio（8 条）+ SSE（14 条）两组传输测试。
+      # django 的测试发现规则会把 agent_engine/tests_*.py 一并收进来
+      - name: 单元测试（stdio + SSE 传输）
+        run: python manage.py test -v 2
+
+      # 服务端不能依赖 Django：它要能被 Claude Desktop / 任意 MCP 客户端
+      # 当作独立子进程拉起。这条在 import 期就会失败，比跑测试更早暴露耦合
+      - name: MCP 服务端不依赖 Django
+        run: python -c "import sys, agent_engine.mcp_server; assert 'django' not in sys.modules, 'MCP 服务端意外 import 了 Django'"
+
+      # SSE 传输要真起 HTTP 服务；这里只验证 ASGI 应用能构造出来，
+      # 真正的连接测试已经在上面的单元测试里跑过了
+      - name: SSE 应用可构造
+        run: python -c "from agent_engine.mcp_server import build_asgi_app; app = build_asgi_app(); print('routes:', [r.path for r in app.routes])"
