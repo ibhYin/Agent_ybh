@@ -1,5 +1,7 @@
 # 智能体 MVP（Agentic Loop 教学项目）
 
+[![CI](https://github.com/ibhYin/Agent_ybh/actions/workflows/ci.yml/badge.svg)](https://github.com/ibhYin/Agent_ybh/actions/workflows/ci.yml)
+
 从零手写的一个带网页聊天界面的智能体：模型思考 → 调用工具 → 结果回传 → 最终回答，**每一步实时可见**。
 
 - 界面：**三段式工作台**（左栏会话 / 中栏对话 / 右栏执行过程），**四套主题**可换，窄屏自动折叠为抽屉
