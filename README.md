@@ -9,6 +9,7 @@
 - MCP 服务端：同一份工具注册表能作为 **MCP 服务**被 Claude Desktop / Cursor 直接调用，支持 stdio 与 SSE 两种传输（`python -m agent_engine.mcp_server [--transport sse]`）
 - MCP 客户端：本项目的 agent 也能**反过来调用外部 MCP 服务**，在【设置 → MCP 服务】里增删，或写根目录 `mcp.json`
 - 本地 MCP 服务：内置**文件系统**与 **SQLite 只读**两个独立服务，独立页面 `/mcp` 管理状态、工具、启停
+- 架构图：`/architecture` 交互页（分层 / 功能 / 数据流 / MCP 双向），节点可点看代码位置
 - 会话：sqlite 持久化，支持多会话（切换 / 重命名 / 删除），标题自动取第一条消息
 - 执行过程：工具名、参数、返回与耗时在右栏时间线实时展开，区分 LOCAL / MCP
 - 安全：工具沙箱（workspace/）、注入防护、API Key 加密存储
@@ -344,6 +345,34 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 - MCP 自动重连（管理页可手动检测状态，但对话连接失败后不会自动重试）
 - MCP 工具审批（外部服务可执行任意本地命令，当前默认信任配置者）
 
+## 功能架构图（`/architecture`）
+
+聊天页左栏与 MCP 页都有入口。四个视图：
+
+- **总览**：界面层 / Django / agent_engine / 外部能力 / 数据与安全，五层节点与有向连线；悬停聚焦，点击看职责、文件、符号、输入输出、关联节点
+- **功能地图**：会话 / 对话与流式 / 工具与过程 / MCP 双向 / 配置与密钥 / 安全边界
+- **数据流**：一条消息从输入、载入上下文、循环、工具执行、回填、SSE 到落库，共 8 步，可逐步播放
+- **MCP 双向**：同时作为客户端（调外部工具）与服务端（对外提供工具）的两条链
+
+### 怎么更新（只改一个文件）
+
+所有节点、连线、功能、流程都在 [agent_engine/architecture.py](agent_engine/architecture.py)；
+页面从 `GET /architecture/data` 读，不写死在前端。
+
+1. 加节点：往 `NODES` 里加一条，`id` 唯一，`layer` 用 `LAYERS` 里的 id
+2. 加连线：往 `_EDGE_SPECS` 加 `(from, to, 标签, kind)`
+3. 补分类：需要就加到 `FEATURES[].items[].nodes` 或 `FLOW[].nodes`
+4. 校验并刷新：
+
+```bash
+python manage.py test chat.tests.ArchitectureDataTest
+```
+
+测试会检查：节点 id 重复、连线指向不存在的节点、`files` 引用的路径是否存在、
+功能/流程/MCP 路径是否引用了不存在的节点。用 `runserver --noreload` 时要重启服务才生效。
+
+字段约定：`files` 只写仓库内相对路径；`symbols` 写函数/类名，不写行号（行号会漂）。
+
 ## 界面说明（给要改前端的人）
 
 页面拆成四块，改功能时先找对应文件：
@@ -358,6 +387,8 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 | 改发送与 SSE 事件映射 | `js/chat.js`（`handleEvent`） |
 | 改设置面板 | `js/settings.js` + `index.html` 的抽屉部分 |
 | 改 MCP 管理页 | `mcp.html` + `js/mcp.js` + `css/mcp.css` |
+| 改架构图内容 | 只改 `agent_engine/architecture.py`；渲染在 `js/architecture.js` |
+| 改架构图样式 | `css/architecture.css` |
 | 加一个本地 MCP 服务 | 在 `agent_engine/mcp_servers/` 新建模块，在 `mcp_servers/__init__.py` 登记 |
 
 布局断点：`>1180px` 三栏；`900–1180px` 右栏收成抽屉；`<900px` 左栏也收成抽屉。

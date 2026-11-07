@@ -1,0 +1,106 @@
+{% load static %}<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>功能架构 · 智能体 MVP</title>
+<link rel="stylesheet" href="{% static 'chat/css/app.css' %}">
+<link rel="stylesheet" href="{% static 'chat/css/architecture.css' %}">
+</head>
+<body class="arch-body">
+
+<svg class="svg-defs" aria-hidden="true">
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 16l9 5 9-5"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M20 12H5M11 6l-6 6 6 6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6l-12 12"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7V5z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3z"/><path d="M14 3v5h4"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2L12 3z"/></symbol>
+</svg>
+
+<div class="arch-shell">
+  <header class="arch-header">
+    <a href="/" class="btn ghost sm">
+      <svg class="ico"><use href="#i-arrow-left"/></svg> 返回对话
+    </a>
+
+    <div class="arch-title">
+      <h1><svg class="ico"><use href="#i-layers"/></svg> 功能架构</h1>
+      <p>节点与连线来自 <kbd>agent_engine/architecture.py</kbd>，点击任意节点看职责与代码位置</p>
+    </div>
+
+    <nav class="arch-tabs" id="arch-tabs">
+      <button class="arch-tab active" data-view="overview">总览</button>
+      <button class="arch-tab" data-view="features">功能地图</button>
+      <button class="arch-tab" data-view="flow">数据流</button>
+      <button class="arch-tab" data-view="mcp">MCP 双向</button>
+    </nav>
+  </header>
+
+  <main class="arch-main">
+    <section class="arch-view active" data-view="overview">
+      <div id="arch-canvas" class="arch-canvas"></div>
+      <div class="arch-legend">
+        <span><i class="lg solid"></i> 调用 / 数据流</span>
+        <span><i class="lg dashed"></i> 约束 / 回推</span>
+        <span class="legend-hint">悬停聚焦相邻节点，点击查看详情</span>
+      </div>
+    </section>
+
+    <section class="arch-view" data-view="features">
+      <div id="feature-grid" class="feature-grid"></div>
+    </section>
+
+    <section class="arch-view" data-view="flow">
+      <div class="flow-head">
+        <div>
+          <h2>一次对话的数据流</h2>
+          <p>从输入到 SSE 推送与落库；点步骤或自动播放</p>
+        </div>
+        <div class="flow-controls">
+          <button id="flow-prev" class="btn ghost sm">上一步</button>
+          <button id="flow-play" class="btn sm">
+            <svg class="ico"><use href="#i-play"/></svg> 播放
+          </button>
+          <button id="flow-next" class="btn ghost sm">下一步</button>
+          <button id="flow-reset" class="btn ghost sm">重置</button>
+        </div>
+      </div>
+      <div id="flow-list" class="flow-list"></div>
+    </section>
+
+    <section class="arch-view" data-view="mcp">
+      <div id="mcp-paths" class="mcp-paths"></div>
+      <div class="shared-note">
+        <svg class="ico"><use href="#i-spark"/></svg>
+        <span id="shared-note-text"></span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="arch-foot">
+    <span>数据源 <kbd>agent_engine/architecture.py</kbd></span>
+    <span>加节点 / 连线只改这一处；<kbd>manage.py test chat.tests.ArchitectureDataTest</kbd> 会校验断链与文件路径</span>
+  </footer>
+</div>
+
+<div id="detail-scrim" class="detail-scrim hidden"></div>
+
+<aside id="arch-detail" class="arch-detail hidden">
+  <div class="detail-head">
+    <span id="detail-layer" class="detail-layer"></span>
+    <button id="detail-close" class="icon-btn" aria-label="关闭">
+      <svg class="ico"><use href="#i-close"/></svg>
+    </button>
+  </div>
+  <div id="detail-body" class="detail-body"></div>
+</aside>
+
+<script src="{% static 'chat/js/architecture.js' %}"></script>
+</body>
+</html>

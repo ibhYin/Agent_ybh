@@ -21,7 +21,7 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 
-from agent_engine import config
+from agent_engine import architecture, config
 from agent_engine.agent import run_agent
 from agent_engine.mcp_client import MCPClient, MCPServerSpec
 from agent_engine.mcp_config import MCPHub, load_file_specs, load_specs
@@ -39,6 +39,15 @@ def index(request):
 def mcp_page(request):
     """独立的 MCP 管理页：比设置里的表单更适合看状态与工具清单。"""
     return render(request, "chat/mcp.html")
+
+
+def architecture_page(request):
+    """功能架构图：数据来自 agent_engine/architecture.py，页面只负责渲染。"""
+    return render(request, "chat/architecture.html")
+
+
+def architecture_data(request):
+    return JsonResponse(architecture.as_dict(), json_dumps_params={"ensure_ascii": False})
 
 
 def history(request):

@@ -5,6 +5,8 @@ from . import views
 urlpatterns = [
     path("", views.index, name="index"),
     path("mcp", views.mcp_page, name="mcp_page"),
+    path("architecture", views.architecture_page, name="architecture_page"),
+    path("architecture/data", views.architecture_data, name="architecture_data"),
     path("chat/sessions", views.sessions, name="sessions"),
     path("chat/sessions/create", views.session_create, name="session_create"),
     path("chat/sessions/rename", views.session_rename, name="session_rename"),

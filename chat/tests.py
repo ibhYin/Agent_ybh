@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
+from agent_engine import architecture
 from chat.models import ChatMessage, ChatSession, MCPServerConfig
 
 
@@ -287,3 +288,46 @@ class MCPPanelApiTest(TestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 404)
+
+
+
+class ArchitectureDataTest(TestCase):
+    """架构图数据的一致性校验。
+
+    这张图的价值是"方便更新"，所以更新后必须能自动发现断链：
+    节点 id 重复、连线指向不存在的节点、引用的文件不存在，都会在这里失败。
+    """
+
+    def test_page_renders(self):
+        resp = self.client.get("/architecture")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "功能架构")
+
+    def test_data_endpoint_shape(self):
+        resp = self.client.get("/architecture/data")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        for key in ("layers", "nodes", "edges", "features", "flow", "mcp_paths"):
+            self.assertIn(key, data)
+            self.assertTrue(data[key])
+        self.assertIn("repo_url", data)
+        self.assertEqual(data["source"], "agent_engine/architecture.py")
+
+    def test_validation_passes(self):
+        self.assertEqual(architecture.validate(), [])
+
+    def test_node_ids_unique(self):
+        ids = [node["id"] for node in architecture.NODES]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_every_node_has_layer_and_role(self):
+        layer_ids = {layer["id"] for layer in architecture.LAYERS}
+        for node in architecture.NODES:
+            self.assertIn(node["layer"], layer_ids)
+            self.assertTrue(node["role"].strip())
+
+    def test_edges_reference_existing_nodes(self):
+        ids = {node["id"] for node in architecture.NODES}
+        for edge in architecture.EDGES:
+            self.assertIn(edge["from"], ids)
+            self.assertIn(edge["to"], ids)
