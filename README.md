@@ -193,6 +193,34 @@ python -m agent_engine.mcp_server        # stdio 传输，由 MCP 客户端拉�
 python -m unittest agent_engine.tests_mcp_server -v
 ```
 
+### 为什么不用 FastMCP / MCPServer
+
+先说结论：**同一份工具要同时喂给 LLM 和 MCP，所以工具定义只能有一处。**
+
+本项目用的是 `@tool` 装饰器 + 类型注解，schema 由 `build_tools_schema()` 从函数签名推导；
+MCP 服务端只是把这份已经存在的 schema 翻译成 `inputSchema`，**没有第二套工具定义**。
+
+换成高层框架（`MCPServer`，即 1.x 时代的 `FastMCP`）就得二选一：
+
+| 做法 | 代价 |
+|---|---|
+| 工具只在框架里注册 | 本地 agent 的 `@tool` 注册表得放弃，或者再维护一份镜像 |
+| 两套都留 | 加一个工具要写两遍，两边还会漂移 |
+
+而高层框架省下的只是 80 行协议胶水——在本项目这个规模上不划算。
+另外低层 `Server` 的接口比高层稳定，SDK 大版本改名时不至于全盘重写。
+
+> 想换成框架写法时，注意 **mcp 2.x 里 `FastMCP` 已改名为 `MCPServer`**。
+> 网上绝大多数教程还是 1.x，照抄会直接报错：
+>
+> ```
+> ImportError: No module named 'mcp.server.fastmcp'. This is mcp 2.x,
+> where FastMCP was renamed to MCPServer (from mcp.server.mcpserver import MCPServer)
+> ```
+>
+> 两条出路：`from mcp.server.mcpserver import MCPServer`（跟 SDK 走），
+> 或 `pip install 'mcp<2'`（留在旧代码上）。
+
 ### 换 SSE 传输：一次起服务，多个客户端同时连
 
 stdio 是一对一：客户端拉起一个子进程，进程跟着客户端活。要让多个客户端共用、
