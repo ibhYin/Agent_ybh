@@ -8,190 +8,271 @@
 </head>
 <body>
 
-<header class="app-header">
-  <div class="brand">
-    <div class="brand-mark">A</div>
-    <div class="brand-text">
-      <h1>智能体 MVP</h1>
-      <p>手写 Agentic Loop · 工具调用过程实时可见</p>
-    </div>
-  </div>
+<!-- 图标定义：线框风格，统一 24×24 视窗 -->
+<svg class="svg-defs" aria-hidden="true">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.4"/><circle cx="8" cy="17" r="2.4"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4-10 10v4z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6l-12 12"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6h5"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><circle cx="8" cy="7" r="1"/><circle cx="8" cy="17" r="1"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2L12 3z"/></symbol>
+</svg>
 
-  <div class="header-spacer"></div>
+<div class="app">
 
-  <div class="status-chips">
-    <span class="chip" data-chip="llm">
-      <span class="chip-dot"></span><span class="chip-label">LLM 检查中</span>
-    </span>
-    <span class="chip" data-chip="mcp">
-      <span class="chip-dot"></span><span class="chip-label">MCP 检查中</span>
-    </span>
-  </div>
-
-  <button id="settings-btn" class="icon-btn">设置</button>
-</header>
-
-<!-- 未配置 LLM 时的引导横幅 -->
-<div id="config-banner" class="banner">
-  <span>尚未配置 LLM，请先在【设置】中填写 API 地址、Key 和模型名称</span>
-  <button id="banner-settings">去配置</button>
-</div>
-
-<main id="messages" class="messages">
-  <div class="empty-state">
-    <div class="es-icon">◇</div>
-    <h2>开始一次对话</h2>
-    <p>模型会自己决定是否调用工具，每一步都实时展示。</p>
-    <div class="es-hints">
-      <button class="suggestion" data-prompt="现在几点了？">现在几点了？</button>
-      <button class="suggestion" data-prompt="计算 (3+5)*7 的结果，然后写入 result.txt">算 (3+5)*7 并写入文件</button>
-      <button class="suggestion" data-prompt="你好，简单介绍一下你能做什么">你能做什么？</button>
-    </div>
-  </div>
-</main>
-
-<div class="composer-wrap">
-  <div class="composer">
-    <textarea id="input" rows="1"
-      placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"
-      autocomplete="off"></textarea>
-    <button id="send">发送</button>
-  </div>
-  <div class="composer-meta">
-    <span>工具在 <kbd>agent_engine/tools.py</kbd> 用 @tool 注册；MCP 服务在【设置】里添加</span>
-  </div>
-</div>
-
-<!-- ================= 设置面板 ================= -->
-<div id="settings-modal" class="modal-overlay hidden">
-  <div class="modal">
-    <div class="modal-header">
-      <h2>设置</h2>
-      <button id="close-settings" class="close-btn" aria-label="关闭">✕</button>
+  <!-- ============ 左栏：会话导航 ============ -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <div class="brand-mark"><svg class="ico"><use href="#i-spark"/></svg></div>
+        <div class="brand-text">
+          <strong>智能体 MVP</strong>
+          <span>Agentic Loop</span>
+        </div>
+      </div>
     </div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="llm">LLM</button>
-      <button class="tab" data-tab="mcp">MCP 服务</button>
-      <button class="tab" data-tab="tools">可用工具</button>
+    <button id="new-chat" class="new-chat">
+      <svg class="ico"><use href="#i-plus"/></svg>
+      <span>新对话</span>
+      <kbd>⌘N</kbd>
+    </button>
+
+    <div class="session-head">
+      <span>会话</span>
+      <span id="session-count" class="session-count">0</span>
     </div>
+    <nav id="session-list" class="session-list"></nav>
 
-    <div class="modal-body">
+    <div class="sidebar-foot">
+      <div class="chips">
+        <span class="chip" data-chip="llm"><i></i><span class="chip-label">LLM 检查中</span></span>
+        <span class="chip" data-chip="mcp"><i></i><span class="chip-label">MCP 检查中</span></span>
+      </div>
+      <button id="settings-btn" class="btn ghost block">
+        <svg class="ico"><use href="#i-settings"/></svg>
+        <span>设置</span>
+      </button>
+    </div>
+  </aside>
 
-      <!-- ---------- LLM ---------- -->
-      <div class="tab-panel active" data-panel="llm">
-        <div class="field">
-          <label for="cfg-base-url">Base URL</label>
-          <input id="cfg-base-url" placeholder="https://api.example.com/v1">
-        </div>
-        <div class="field">
-          <label for="cfg-api-key">API Key</label>
-          <input id="cfg-api-key" type="password" placeholder="已配置则留空，输入新值可覆盖">
-        </div>
-        <div class="field">
-          <label for="cfg-model">Model</label>
-          <input id="cfg-model" placeholder="如 deepseek-chat / qwen-plus">
-        </div>
-        <div class="actions">
-          <button id="save-config" class="btn">保存配置</button>
-        </div>
-        <div id="llm-status" class="status-line"></div>
-        <p id="llm-current" class="hint">读取中…</p>
-        <p class="hint">
-          配置存服务器数据库，立即生效；API Key 加密存储，前端不持有、不回显。
-          留空的项会回退到 <kbd>.env</kbd>。
-        </p>
+  <!-- ============ 中栏：对话 ============ -->
+  <main class="chat">
+    <header class="chat-head">
+      <button id="sidebar-toggle" class="icon-btn mobile-only" aria-label="会话列表">
+        <svg class="ico"><use href="#i-menu"/></svg>
+      </button>
+
+      <div class="chat-title">
+        <h1 id="chat-title">新对话</h1>
+        <span id="chat-meta">开始输入吧</span>
       </div>
 
-      <!-- ---------- MCP ---------- -->
-      <div class="tab-panel" data-panel="mcp">
-        <div class="actions" style="margin-top:0;margin-bottom:12px">
-          <button id="mcp-add" class="btn btn-sm">添加服务</button>
-          <span class="hint" style="margin:0">
-            也可以把配置写在项目根目录的 <kbd>mcp.json</kbd>（格式与 Claude Desktop 兼容）
-          </span>
-        </div>
-
-        <div id="server-list"></div>
-
-        <hr style="border:none;border-top:1px solid var(--border);margin:18px 0 14px">
-
-        <div class="field-row">
-          <div class="field">
-            <label for="mcp-name">服务名（工具名前缀，唯一）</label>
-            <input id="mcp-name" placeholder="filesystem">
-          </div>
-          <div class="field">
-            <label for="mcp-transport">传输方式</label>
-            <select id="mcp-transport">
-              <option value="stdio">stdio（本地进程）</option>
-              <option value="sse">SSE（HTTP 长连接）</option>
-            </select>
-          </div>
-        </div>
-
-        <div id="field-stdio">
-          <div class="field">
-            <label for="mcp-command">启动命令</label>
-            <input id="mcp-command" placeholder="npx">
-          </div>
-          <div class="field">
-            <label for="mcp-args">参数（一行一个）</label>
-            <textarea id="mcp-args" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea>
-          </div>
-          <div class="field">
-            <label for="mcp-cwd">工作目录（可选）</label>
-            <input id="mcp-cwd" placeholder="/absolute/path">
-          </div>
-        </div>
-
-        <div id="field-sse" style="display:none">
-          <div class="field">
-            <label for="mcp-url">SSE 端点 URL</label>
-            <input id="mcp-url" placeholder="http://127.0.0.1:8022/sse">
-          </div>
-        </div>
-
-        <div class="actions">
-          <button id="mcp-save" class="btn">保存服务</button>
-          <button id="mcp-reset" class="btn btn-ghost">清空表单</button>
-        </div>
-        <div id="mcp-status" class="status-line"></div>
-
-        <p class="hint">
-          工具会以 <kbd>服务名__工具名</kbd> 的形式出现在模型可用的工具列表里。
-          同名服务以数据库配置为准，覆盖 mcp.json。
-        </p>
+      <div class="chat-head-actions">
+        <button id="model-chip" class="model-chip" title="点击修改 LLM 配置">
+          <i></i><span>未配置模型</span>
+        </button>
+        <button id="trace-toggle" class="icon-btn trace-toggle" aria-label="执行过程">
+          <svg class="ico"><use href="#i-activity"/></svg>
+          <span>过程</span>
+        </button>
       </div>
+    </header>
 
-      <!-- ---------- 工具 ---------- -->
-      <div class="tab-panel" data-panel="tools">
-        <p class="hint" style="margin-top:0;margin-bottom:12px">
-          可用工具（<span id="tool-count">…</span>）：
-          本地工具来自 <kbd>@tool</kbd> 注册表，MCP 工具在连接成功后才出现。
-        </p>
-        <div id="tool-list"></div>
-      </div>
-
+    <div id="banner" class="banner">
+      <span>尚未配置 LLM，填写 API 地址 / Key / 模型名后才能对话</span>
+      <button id="banner-settings">去配置</button>
     </div>
-  </div>
+
+    <div id="messages" class="messages">
+      <div id="empty-state" class="empty-state">
+        <div class="empty-mark"><svg class="ico"><use href="#i-spark"/></svg></div>
+        <h2>开始一次对话</h2>
+        <p>模型会自己决定是否调用工具，左侧是对话，右侧是执行过程。</p>
+        <div class="suggestions">
+          <button class="suggestion" data-prompt="现在几点了？">现在几点了？</button>
+          <button class="suggestion" data-prompt="计算 (3+5)*7 的结果，然后写入 result.txt">算 (3+5)*7 并写入文件</button>
+          <button class="suggestion" data-prompt="你好，简单介绍一下你能做什么">你能做什么？</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="composer-box">
+        <textarea id="input" rows="1" autocomplete="off"
+          placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+        <button id="send" class="send-btn" aria-label="发送">
+          <svg class="ico"><use href="#i-send"/></svg>
+        </button>
+      </div>
+      <div class="composer-meta">
+        <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</span>
+        <span id="composer-status" class="composer-status">就绪</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ 右栏：执行过程 ============ -->
+  <aside id="trace" class="trace">
+    <header class="trace-head">
+      <div>
+        <h2><svg class="ico"><use href="#i-activity"/></svg> 执行过程</h2>
+        <p>模型调用工具、参数与返回，实时可见</p>
+      </div>
+      <button id="trace-close" class="icon-btn mobile-only" aria-label="关闭">
+        <svg class="ico"><use href="#i-close"/></svg>
+      </button>
+    </header>
+
+    <div id="trace-stats" class="trace-stats">
+      <span class="stat"><em>0</em> 工具调用</span>
+      <span class="stat"><em>0</em> MCP</span>
+      <span class="stat"><em>--</em> 本轮耗时</span>
+    </div>
+
+    <div id="trace-body" class="trace-body">
+      <div id="trace-empty" class="trace-empty">
+        <svg class="ico"><use href="#i-activity"/></svg>
+        <p>这里会实时显示模型执行了什么</p>
+        <span>发一条消息，比如「现在几点了」</span>
+      </div>
+    </div>
+  </aside>
+
 </div>
+
+<!-- 遮罩：移动端抽屉用 -->
+<div id="scrim" class="scrim hidden"></div>
+
+<!-- ============ 设置抽屉 ============ -->
+<div id="settings-overlay" class="settings-overlay hidden"></div>
+<aside id="settings-drawer" class="settings-drawer hidden">
+  <header class="drawer-head">
+    <h2>设置</h2>
+    <button id="close-settings" class="icon-btn" aria-label="关闭">
+      <svg class="ico"><use href="#i-close"/></svg>
+    </button>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="llm">LLM</button>
+    <button class="tab" data-tab="mcp">MCP 服务</button>
+    <button class="tab" data-tab="tools">可用工具</button>
+  </div>
+
+  <div class="drawer-body">
+    <!-- LLM -->
+    <section class="tab-panel active" data-panel="llm">
+      <div class="field">
+        <label for="cfg-base-url">Base URL</label>
+        <input id="cfg-base-url" placeholder="https://api.example.com/v1">
+      </div>
+      <div class="field">
+        <label for="cfg-api-key">API Key</label>
+        <input id="cfg-api-key" type="password" placeholder="已配置则留空，输入新值可覆盖">
+      </div>
+      <div class="field">
+        <label for="cfg-model">Model</label>
+        <input id="cfg-model" placeholder="如 deepseek-chat / qwen-plus">
+      </div>
+      <div class="actions">
+        <button id="save-config" class="btn">保存配置</button>
+      </div>
+      <div id="llm-status" class="status-line"></div>
+      <p id="llm-current" class="hint">读取中…</p>
+      <p class="hint">配置存服务器数据库，立即生效。API Key 加密存储，前端不持有也不回显；留空项回退 <kbd>.env</kbd>。</p>
+    </section>
+
+    <!-- MCP -->
+    <section class="tab-panel" data-panel="mcp">
+      <div class="actions" style="margin-top:0">
+        <button id="mcp-add" class="btn sm">添加服务</button>
+        <span class="hint" style="margin:0">也可写项目根目录 <kbd>mcp.json</kbd>（与 Claude Desktop 格式兼容）</span>
+      </div>
+
+      <div id="server-list" class="server-list"></div>
+
+      <div class="divider"></div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="mcp-name">服务名（工具名前缀，唯一）</label>
+          <input id="mcp-name" placeholder="filesystem">
+        </div>
+        <div class="field">
+          <label for="mcp-transport">传输方式</label>
+          <select id="mcp-transport">
+            <option value="stdio">stdio（本地进程）</option>
+            <option value="sse">SSE（HTTP 长连接）</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="field-stdio">
+        <div class="field">
+          <label for="mcp-command">启动命令</label>
+          <input id="mcp-command" placeholder="npx">
+        </div>
+        <div class="field">
+          <label for="mcp-args">参数（一行一个）</label>
+          <textarea id="mcp-args" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"></textarea>
+        </div>
+        <div class="field">
+          <label for="mcp-cwd">工作目录（可选）</label>
+          <input id="mcp-cwd" placeholder="/absolute/path">
+        </div>
+      </div>
+
+      <div id="field-sse" style="display:none">
+        <div class="field">
+          <label for="mcp-url">SSE 端点 URL</label>
+          <input id="mcp-url" placeholder="http://127.0.0.1:8022/sse">
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="mcp-save" class="btn">保存服务</button>
+        <button id="mcp-reset" class="btn ghost">清空表单</button>
+      </div>
+      <div id="mcp-status" class="status-line"></div>
+      <p class="hint">工具会以 <kbd>服务名__工具名</kbd> 出现在模型可用的工具列表。同名服务以数据库为准，覆盖 mcp.json。</p>
+    </section>
+
+    <!-- 工具 -->
+    <section class="tab-panel" data-panel="tools">
+      <div class="tools-head">
+        <p class="hint" style="margin:0">可用工具（<span id="tool-count">…</span>）。本地工具来自 <kbd>@tool</kbd> 注册表，MCP 工具需连接成功后才出现。</p>
+        <button id="tools-refresh" class="btn ghost sm">刷新</button>
+      </div>
+      <div id="tool-errors" class="status-line err"></div>
+      <div id="tool-list" class="tool-list"></div>
+    </section>
+  </div>
+</aside>
+
+<div id="toast" class="toast hidden"></div>
 
 <script src="{% static 'chat/js/api.js' %}"></script>
 <script src="{% static 'chat/js/ui.js' %}"></script>
+<script src="{% static 'chat/js/trace.js' %}"></script>
+<script src="{% static 'chat/js/sessions.js' %}"></script>
 <script src="{% static 'chat/js/chat.js' %}"></script>
 <script src="{% static 'chat/js/settings.js' %}"></script>
 <script>
-  // 推荐提问：点一下填进输入框
-  for (const btn of document.querySelectorAll(".suggestion")) {
-    btn.addEventListener("click", () => {
-      const input = document.getElementById("input");
-      input.value = btn.dataset.prompt;
-      input.focus();
-    });
-  }
-  chat.init();
-  settings.init();
+  window.addEventListener("DOMContentLoaded", async () => {
+    ui.init();
+    settings.init();
+    trace.init();
+    chat.init();
+    await sessions.init();
+  });
 </script>
 </body>
 </html>

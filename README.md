@@ -2,12 +2,14 @@
 
 从零手写的一个带网页聊天界面的智能体：模型思考 → 调用工具 → 结果回传 → 最终回答，**每一步实时可见**。
 
-- 后端：Django 5 + 原生 HTML/JS 前端（无前端框架，静态资源已拆分模块）
-- LLM：OpenAI 兼容协议，**任意第三方服务**（DeepSeek / Kimi / 通义千问 / 硅基流动 / vLLM / Ollama…），在**页面右上角【设置】面板**即可切换（.env 仅作可选兜底）
-- 工具：**页面设置面板实时查看可用工具列表**（@tool 注册后自动出现）
+- 界面：**三段式工作台**（左栏会话 / 中栏对话 / 右栏执行过程），深色主题，窄屏自动折叠为抽屉
+- 后端：Django 5 + 原生 HTML/JS 前端（无前端框架，静态资源按职责拆分模块）
+- LLM：OpenAI 兼容协议，**任意第三方服务**（DeepSeek / Kimi / 通义千问 / 硅基流动 / vLLM / Ollama…），在页面【设置】里即可切换（.env 仅作可选兜底）
+- 工具：设置面板实时查看可用工具列表（@tool 注册后自动出现）
 - MCP 服务端：同一份工具注册表能作为 **MCP 服务**被 Claude Desktop / Cursor 直接调用，支持 stdio 与 SSE 两种传输（`python -m agent_engine.mcp_server [--transport sse]`）
-- MCP 客户端：本项目的 agent 也能**反过来调用外部 MCP 服务**，在页面【设置 → MCP 服务】里增删，或写根目录 `mcp.json`
-- 对话：sqlite 持久化，刷新页面不丢失
+- MCP 客户端：本项目的 agent 也能**反过来调用外部 MCP 服务**，在【设置 → MCP 服务】里增删，或写根目录 `mcp.json`
+- 会话：sqlite 持久化，支持多会话（切换 / 重命名 / 删除），标题自动取第一条消息
+- 执行过程：工具名、参数、返回与耗时在右栏时间线实时展开，区分 LOCAL / MCP
 - 安全：工具沙箱（workspace/）、注入防护、API Key 加密存储
 
 ## 环境要求
@@ -57,17 +59,19 @@ agent_engine/          # 智能体核心（不依赖 Django，可单独复用）
 ├── tests_mcp_sse.py   # 服务端测试：SSE 传输（真起 uvicorn + 并发 + Host/Origin 校验）
 └── tests_mcp_client.py  # 客户端测试：连接生命周期、错误信息、配置合并
 chat/                  # Django 层
-├── views.py           # 页面 / 工具 / 配置 / 历史 / 聊天流 / MCP 服务管理 端点
-├── models.py          # ChatMessage + LLMConfig（加密配置）+ MCPServerConfig
+├── views.py           # 页面 / 会话 / 工具 / 配置 / 历史 / 聊天流 / MCP 服务管理 端点
+├── models.py          # ChatSession + ChatMessage + LLMConfig + MCPServerConfig
 ├── crypto.py          # API Key 对称加密（Fernet）
-├── templates/chat/index.html   # 页面结构（设置面板用标签页组织）
+├── templates/chat/index.html   # 页面骨架（三段式：左栏 / 中栏 / 右栏）
 └── static/chat/       # 前端资源，按职责拆开
-    ├── css/app.css    #   全部样式（CSS 变量，跟随系统深色模式）
+    ├── css/app.css    #   深色主题与布局（CSS 变量 + 响应式抽屉）
     └── js/
-        ├── api.js     #   后端接口封装，加功能只改这里
-        ├── ui.js      #   DOM 渲染（气泡、工具卡片、服务卡片）
-        ├── chat.js    #   会话、SSE 事件 -> 界面
-        └── settings.js#   设置面板三个标签页
+        ├── api.js     #   后端接口封装，加接口只改这里
+        ├── ui.js      #   DOM 渲染（消息气泡、轻量 Markdown、服务卡片、抽屉）
+        ├── trace.js   #   右栏执行过程：实时时间线 + 历史回放 + 统计
+        ├── sessions.js#   左栏会话列表：切换 / 新建 / 重命名 / 删除
+        ├── chat.js    #   中栏对话：SSE 事件 -> 文本与过程
+        └── settings.js#   设置抽屉：LLM / MCP 服务 / 可用工具
 ```
 
 ## 安全设计
@@ -99,14 +103,16 @@ chat/                  # Django 层
 `agent.py` 的 `run_agent()` 是生成器，每一步 `yield` 一个事件，Django 视图转成 SSE 推给浏览器：
 
 ```
-后端 run_agent                    浏览器页面
-   │                                │
-   ├─ text_delta "我来计算一下..." → 打字机效果
-   ├─ tool_start calculate 参数     → 工具卡片（执行中）
-   ├─ tool_result 56               → 卡片填结果、收起
-   ├─ text_delta "结果是 56..."     → 继续打字
-   └─ done                         → 结束
+后端 run_agent                       浏览器
+   │                                   ├─ 中栏：对话文本
+   ├─ text_delta "我来计算一下..." →   │   打字机效果
+   ├─ tool_start calculate 参数     →   ├─ 右栏：新增步骤（执行中）
+   ├─ tool_result 56               →   │   填结果、显示耗时
+   ├─ text_delta "结果是 56..."     →   ├─ 中栏：继续打字
+   └─ done                         →   └─ 右栏：本轮收尾（工具数 / 耗时）
 ```
+
+工具细节不塞进聊天气泡：中栏只保留对话，右栏专门展示执行过程。
 
 ## 工具怎么自动变成 LLM 认识的格式？
 
@@ -298,7 +304,7 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 
 ## 后续演进方向（当前刻意简化）
 
-- 多会话列表（当前只有单会话，session_id 存 localStorage）
+- 会话搜索与归档（当前列表只按更新时间排序，没有搜索）
 - 用户系统与消息归属（当前 `session_id` 谁都能查）
 - 访问鉴权（当前服务仅监听 127.0.0.1，无访问口令）
 - CSRF 防护（当前 `@csrf_exempt` 仅为本地学习简化）
@@ -306,3 +312,19 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 - 加密密钥独立管理（当前由 Django SECRET_KEY 派生；SECRET_KEY 是仓库里的开发默认值）
 - MCP 服务健康检查与重连（当前连接失败只记录，不自动重试）
 - MCP 工具审批（外部服务可执行任意本地命令，当前默认信任配置者）
+
+## 界面说明（给要改前端的人）
+
+页面拆成四块，改功能时先找对应文件：
+
+| 想改什么 | 改哪里 |
+|---|---|
+| 颜色、间距、响应式 | `chat/static/chat/css/app.css`（顶部是 CSS 变量） |
+| 加一个后端接口 | `chat/static/chat/js/api.js` + `chat/views.py` |
+| 加一种消息/卡片样式 | `js/ui.js` |
+| 改右栏执行过程的展示 | `js/trace.js`（`addTool` / `finishTool` / `endTurn`） |
+| 改会话列表行为 | `js/sessions.js` |
+| 改发送与 SSE 事件映射 | `js/chat.js`（`handleEvent`） |
+| 改设置面板 | `js/settings.js` + `index.html` 的抽屉部分 |
+
+布局断点：`>1180px` 三栏；`900–1180px` 右栏收成抽屉；`<900px` 左栏也收成抽屉。

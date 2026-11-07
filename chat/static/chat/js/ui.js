@@ -1,14 +1,17 @@
 /* =========================================================================
-   DOM 渲染：只负责把数据变成元素，不碰网络、不碰业务状态。
-   加新卡片类型时在这里加一个函数即可。
+   DOM 渲染与通用交互
+   只负责把数据变成元素、以及抽屉/提示这类壳层交互；不碰网络与业务状态。
    ========================================================================= */
 
 const ui = (() => {
   const messagesEl = () => document.getElementById("messages");
+  const scrim = () => document.getElementById("scrim");
+  const inner = () => document.querySelector(".messages-inner");
 
-  function scrollToBottom() {
-    const el = messagesEl();
-    el.scrollTop = el.scrollHeight;
+  // ---------- 基础 ----------
+
+  function icon(name) {
+    return `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;
   }
 
   function el(tag, className, text) {
@@ -18,84 +21,147 @@ const ui = (() => {
     return node;
   }
 
-  /** 移除空状态占位（首次发消息时调用） */
-  function clearEmptyState() {
-    const placeholder = document.querySelector(".empty-state");
-    if (placeholder) placeholder.remove();
+  function init() {
+    // 统一装进一个限宽容器：空状态与消息共用同一列宽
+    const wrap = el("div", "messages-inner");
+    const empty = document.getElementById("empty-state");
+    if (empty) wrap.appendChild(empty);
+    messagesEl().appendChild(wrap);
+
+    scrim().addEventListener("click", closeDrawers);
+    for (const s of document.querySelectorAll(".suggestion")) {
+      s.addEventListener("click", () => {
+        const input = document.getElementById("input");
+        input.value = s.dataset.prompt;
+        input.focus();
+      });
+    }
   }
 
-  function addBubble(kind, text = "") {
-    clearEmptyState();
+  function scrollToBottom() {
+    const el = messagesEl();
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function setEmpty(show) {
+    const empty = document.getElementById("empty-state");
+    if (empty) empty.style.display = show ? "" : "none";
+  }
+
+  // ---------- 抽屉 ----------
+
+  function openPanel(id) {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    panel.classList.add("open");
+    scrim().classList.remove("hidden");
+  }
+
+  function closeDrawers() {
+    for (const id of ["sidebar", "trace"]) {
+      document.getElementById(id)?.classList.remove("open");
+    }
+    scrim().classList.add("hidden");
+  }
+
+  // ---------- 消息 ----------
+
+  function addMessage(kind, text = "") {
+    setEmpty(false);
     const row = el("div", `msg ${kind}`);
+
+    const avatar = el("div", "msg-avatar");
+    if (kind === "assistant") avatar.innerHTML = icon("spark");
+    else if (kind === "error") avatar.textContent = "!";
+    else avatar.textContent = "你";
+
+    const main = el("div", "msg-main");
+    main.appendChild(el("div", "msg-role",
+      kind === "user" ? "YOU" : kind === "assistant" ? "AGENT" : "ERROR"));
+
     const bubble = el("div", "bubble", text);
-    row.appendChild(bubble);
-    messagesEl().appendChild(row);
+    main.appendChild(bubble);
+    row.append(avatar, main);
+    inner().appendChild(row);
     scrollToBottom();
     return bubble;
   }
 
-  const addUserBubble = (text) => addBubble("user", text);
-  const addAssistantBubble = () => addBubble("assistant");
-  const addErrorBubble = (text) => addBubble("error", text);
+  const addUser = (text) => addMessage("user", text);
+  const addAssistant = () => addMessage("assistant");
+  const addError = (text) => addMessage("error", text);
 
-  /**
-   * 工具卡片。source: "local" | "mcp"
-   * 返回卡片句柄，后续 setToolResult 用它更新同一条记录。
-   */
-  function createToolCard(id, name, args, status, source = "local") {
-    clearEmptyState();
-    const details = el("details", "tool-card");
-    details.open = status === "running";
-
-    const summary = el("summary");
-    summary.appendChild(el("span", "tool-icon", source === "mcp" ? "⇄" : "⚙"));
-
-    const nameEl = el("span", "tool-name", name);
-    nameEl.title = name;
-    summary.appendChild(nameEl);
-
-    if (source === "mcp") {
-      summary.appendChild(el("span", "tool-badge mcp", "MCP"));
-    }
-
-    const statusEl = el("span", "tool-status" + (status === "running" ? " running" : ""));
-    if (status === "running") {
-      statusEl.appendChild(el("span", "spinner"));
-      statusEl.appendChild(document.createTextNode("执行中"));
-    } else {
-      statusEl.textContent = "已完成";
-    }
-    summary.appendChild(statusEl);
-
-    const body = el("div", "tool-body");
-    body.appendChild(el("div", "label", "参数"));
-    body.appendChild(el("pre", null, args || "{}"));
-
-    details.append(summary, body);
-    messagesEl().appendChild(details);
-    scrollToBottom();
-
-    return { el: details, body, statusEl };
-  }
-
-  function setToolResult(card, result) {
-    if (!card) return;
-    card.body.appendChild(el("div", "label", "结果"));
-    card.body.appendChild(el("pre", null, result));
-    card.statusEl.className = "tool-status";
-    card.statusEl.textContent = "已完成";
-    card.el.open = false; // 结果就绪后收起，保持聊天流整洁
-    scrollToBottom();
-  }
-
-  /** 打字光标：流式输出时挂在气泡上 */
-  function setTyping(bubble, typing) {
+  function setTyping(bubble, on) {
     if (!bubble) return;
-    bubble.classList.toggle("caret", typing);
+    bubble.classList.toggle("typing", !!on);
   }
 
-  // ---------- 工具列表（设置面板） ----------
-  function renderToolList(container, tools, localCount = null) {
+  // ---------- 轻量 Markdown ----------
+  // 只支持对话里最常见的两种：**加粗** 与 `代码`。
+  // 先整体转义，再插入固定标签，避免模型输出里的 HTML 被执行。
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function renderRich(text) {
+    let html = escapeHtml(text);
+    html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+    html = html.replace(/\*\*([^\n]+?)\*\*/g, "<strong>$1</strong>");
+    return html;
+  }
+
+  function setRich(bubble, text) {
+    if (!bubble) return;
+    bubble.__raw = String(text ?? "");
+    bubble.innerHTML = renderRich(bubble.__raw);
+  }
+
+  function appendRich(bubble, delta) {
+    if (!bubble) return;
+    bubble.__raw = (bubble.__raw || "") + String(delta ?? "");
+    bubble.innerHTML = renderRich(bubble.__raw);
+  }
+
+  function clearMessages() {
+    for (const node of inner().querySelectorAll(".msg")) node.remove();
+    setEmpty(true);
+  }
+
+  // ---------- 轻提示 ----------
+
+  let toastTimer = null;
+  function toast(message, kind = "") {
+    const node = document.getElementById("toast");
+    node.textContent = message;
+    node.className = `toast ${kind}`.trim();
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => node.classList.add("hidden"), 2600);
+  }
+
+  // ---------- 时间 ----------
+
+  function relativeTime(iso) {
+    if (!iso) return "";
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return "";
+    const diff = (Date.now() - t) / 1000;
+    if (diff < 60) return "刚刚";
+    if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+    if (diff < 172800) return "昨天";
+    const d = new Date(t);
+    return `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
+  }
+
+  // ---------- 设置面板：工具列表 ----------
+
+  function renderToolList(container, tools) {
     container.innerHTML = "";
     if (!tools.length) {
       container.appendChild(el("div", "empty-note", "暂无工具"));
@@ -113,8 +179,9 @@ const ui = (() => {
     }
   }
 
-  // ---------- MCP 服务卡片 ----------
-  function createServerCard(server) {
+  // ---------- 设置面板：MCP 服务卡片 ----------
+
+  function renderServerCard(server) {
     const card = el("div", "server-card" + (server.enabled ? "" : " disabled"));
 
     const head = el("div", "server-head");
@@ -128,23 +195,19 @@ const ui = (() => {
     }
 
     const actions = el("div", "server-actions");
-
     if (server.source === "database") {
-      const editBtn = el("button", "btn btn-ghost btn-sm", "编辑");
-      editBtn.dataset.action = "edit";
-      editBtn.dataset.name = server.name;
-
-      const delBtn = el("button", "btn btn-danger btn-sm", "删除");
-      delBtn.dataset.action = "delete";
-      delBtn.dataset.name = server.name;
-
-      actions.append(editBtn, delBtn);
+      const edit = el("button", "btn ghost sm", "编辑");
+      edit.dataset.action = "edit";
+      edit.dataset.name = server.name;
+      const del = el("button", "btn danger sm", "删除");
+      del.dataset.action = "delete";
+      del.dataset.name = server.name;
+      actions.append(edit, del);
     }
-
-    const testBtn = el("button", "btn btn-ghost btn-sm", "测试");
-    testBtn.dataset.action = "test";
-    testBtn.dataset.name = server.name;
-    actions.appendChild(testBtn);
+    const test = el("button", "btn ghost sm", "测试");
+    test.dataset.action = "test";
+    test.dataset.name = server.name;
+    actions.appendChild(test);
 
     head.appendChild(actions);
     card.appendChild(head);
@@ -154,40 +217,45 @@ const ui = (() => {
       : [server.command, ...(server.args || [])].join(" ");
     card.appendChild(el("div", "server-cmd", cmd || "（未配置）"));
 
-    const toolsBox = el("div", "server-tools");
-    toolsBox.style.display = "none";
-    card.appendChild(toolsBox);
-
+    const tools = el("div", "server-tools");
+    card.appendChild(tools);
     return card;
   }
 
   function setServerTools(card, { tools, error }) {
     const box = card.querySelector(".server-tools");
-    box.style.display = "block";
-    box.className = "server-tools" + (error ? " err" : "");
+    box.classList.add("show");
     if (error) {
+      box.classList.add("err");
       box.textContent = "连接失败：" + error;
       return;
     }
     if (!tools.length) {
-      box.textContent = "已连接，但该服务没有提供任何工具";
+      box.textContent = "已连接，但该服务没有提供工具";
       return;
     }
     box.textContent = `已连接，${tools.length} 个工具：` + tools.map((t) => t.name).join("、");
   }
 
   return {
+    icon,
     el,
+    init,
     scrollToBottom,
-    clearEmptyState,
-    addUserBubble,
-    addAssistantBubble,
-    addErrorBubble,
-    createToolCard,
-    setToolResult,
+    setEmpty,
+    addUser,
+    addAssistant,
+    addError,
     setTyping,
+    setRich,
+    appendRich,
+    clearMessages,
+    toast,
+    relativeTime,
     renderToolList,
-    createServerCard,
+    renderServerCard,
     setServerTools,
+    openPanel,
+    closeDrawers,
   };
 })();

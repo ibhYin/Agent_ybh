@@ -1,6 +1,6 @@
 /* =========================================================================
    后端接口封装
-   所有 fetch 都集中在这里：加新功能时只改这一个文件，页面逻辑不用碰网络细节。
+   页面逻辑不直接碰网络：加接口只改这一个文件。
    ========================================================================= */
 
 async function requestJSON(url, options = {}) {
@@ -20,17 +20,36 @@ async function requestJSON(url, options = {}) {
 }
 
 const api = {
+  // ---------- 会话 ----------
+  sessions: () => requestJSON("/chat/sessions"),
+
+  createSession: (title = "") =>
+    requestJSON("/chat/sessions/create", { method: "POST", body: JSON.stringify({ title }) }),
+
+  renameSession: (session_id, title) =>
+    requestJSON("/chat/sessions/rename", {
+      method: "POST",
+      body: JSON.stringify({ session_id, title }),
+    }),
+
+  deleteSession: (session_id) =>
+    requestJSON("/chat/sessions/delete", {
+      method: "POST",
+      body: JSON.stringify({ session_id }),
+    }),
+
+  // ---------- 对话 ----------
   history: (sessionId) =>
     requestJSON(`/chat/history?session_id=${encodeURIComponent(sessionId)}`),
 
-  tools: (withMcp = false) =>
-    requestJSON(`/chat/tools${withMcp ? "?with_mcp=1" : ""}`),
+  tools: (withMcp = false) => requestJSON(`/chat/tools${withMcp ? "?with_mcp=1" : ""}`),
 
   config: () => requestJSON("/chat/config"),
 
   saveConfig: (cfg) =>
     requestJSON("/chat/config-save", { method: "POST", body: JSON.stringify(cfg) }),
 
+  // ---------- MCP 服务 ----------
   mcpList: () => requestJSON("/chat/mcp"),
 
   mcpSave: (server) =>
@@ -44,8 +63,8 @@ const api = {
 
   /**
    * 发送消息并消费 SSE 流。
-   * 用 fetch + ReadableStream 而不是 EventSource：EventSource 只能发 GET，
-   * 而这里要把消息体 POST 上去，且需要把 401/500 之类当成错误处理。
+   * 用 fetch + ReadableStream 而不是 EventSource：EventSource 只能 GET，
+   * 而这里要 POST 消息体，也需要把 4xx/5xx 当成错误处理。
    */
   async streamChat({ sessionId, message, onEvent, signal }) {
     const res = await fetch("/chat/stream", {

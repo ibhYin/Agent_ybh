@@ -1,98 +1,133 @@
 /* =========================================================================
-   会话与聊天流
-   职责：session 管理、SSE 事件 → UI 映射、历史回放。
+   中栏：对话
+   会话切换、消息渲染、SSE 事件映射（聊天文本 + 右侧执行过程）。
    ========================================================================= */
 
 const chat = (() => {
-  // 会话 ID：首次访问生成 UUID 存 localStorage，刷新后靠它从后端恢复历史
-  let sessionId = localStorage.getItem("session_id");
-  if (!sessionId) {
-    sessionId = crypto.randomUUID();
-    localStorage.setItem("session_id", sessionId);
+  let sessionId = null;
+  let busy = false;
+  let controller = null;
+  let currentBubble = null;
+
+  // ---------- 头部与状态 ----------
+
+  function setHeader(session) {
+    const title = document.getElementById("chat-title");
+    const meta = document.getElementById("chat-meta");
+    if (!session) {
+      title.textContent = "新对话";
+      meta.textContent = "开始输入吧";
+      return;
+    }
+    title.textContent = session.title || "新对话";
+    const turns = session.turn_count ?? session.message_count;
+    meta.textContent = `${turns} 轮对话 · ${ui.relativeTime(session.updated_at)}`;
   }
 
-  // tool_call_id -> 卡片句柄（实时渲染与历史回放共用）
-  const toolCards = new Map();
+  function updateMeta(session) {
+    setHeader(session);
+  }
 
-  let currentBubble = null;   // 当前正在流式输出的助手气泡
-  let busy = false;
-  let abortController = null;
+  function setStatus(text, kind = "") {
+    const el = document.getElementById("composer-status");
+    el.textContent = text;
+    el.className = "composer-status" + (kind ? " " + kind : "");
+  }
 
   function setBusy(value) {
     busy = value;
     const input = document.getElementById("input");
     const sendBtn = document.getElementById("send");
     input.disabled = value;
-    sendBtn.disabled = value;
-    sendBtn.textContent = value ? "生成中" : "发送";
+    sendBtn.innerHTML = ui.icon(value ? "stop" : "send");
+    sendBtn.title = value ? "停止生成" : "发送";
+    sendBtn.setAttribute("aria-label", value ? "停止生成" : "发送");
     if (!value) input.focus();
   }
 
-  /** 从一个 SSE 事件更新界面 */
+  // ---------- 会话 ----------
+
+  async function openSession(id) {
+    if (busy) stop();
+
+    sessionId = id;
+    currentBubble = null;
+
+    const meta = sessions.find(id);
+    setHeader(meta);
+    ui.clearMessages();
+    trace.reset();
+
+    try {
+      const data = await api.history(id);
+      renderHistory(data.messages || []);
+      trace.renderHistory(data.messages || []);
+      setStatus("就绪");
+    } catch (e) {
+      ui.addError("无法加载历史记录：" + e.message);
+      setStatus("加载失败", "error");
+    }
+
+    document.getElementById("messages").scrollTop = 0;
+  }
+
+  function renderHistory(messages) {
+    for (const m of messages) {
+      if (m.role === "user") {
+        ui.addUser(m.content || "");
+      } else if (m.role === "assistant" && m.content) {
+        ui.setRich(ui.addAssistant(), m.content);
+      }
+      // role="tool" 的内容归右侧过程面板展示
+    }
+    if (messages.length) ui.setEmpty(false);
+  }
+
+  // ---------- 发送与流式 ----------
+
   function handleEvent(event) {
     switch (event.type) {
       case "text_delta":
-        if (!currentBubble) currentBubble = ui.addAssistantBubble();
-        currentBubble.textContent += event.content;
+        if (!currentBubble) currentBubble = ui.addAssistant();
+        ui.appendRich(currentBubble, event.content);
         ui.setTyping(currentBubble, true);
         ui.scrollToBottom();
         break;
 
       case "tool_start":
         ui.setTyping(currentBubble, false);
-        currentBubble = null; // 工具调用打断本轮文本
-        toolCards.set(
-          event.id,
-          ui.createToolCard(event.id, event.name, event.args, "running", event.source || "local")
-        );
+        currentBubble = null;
+        trace.addTool({
+          id: event.id,
+          name: event.name,
+          args: event.args,
+          source: event.source,
+        });
+        setStatus(`调用 ${event.name}…`, "busy");
         break;
 
       case "tool_result":
-        ui.setToolResult(toolCards.get(event.id), event.result);
+        trace.finishTool(event.id, event.result);
+        setStatus("工具已返回，继续生成…", "busy");
         break;
 
       case "error":
         ui.setTyping(currentBubble, false);
         currentBubble = null;
-        ui.addErrorBubble(event.message);
+        ui.addError(event.message);
+        trace.addError(event.message);
+        trace.endTurn("error");
+        setStatus("出错", "error");
         break;
 
       case "done":
         ui.setTyping(currentBubble, false);
         currentBubble = null;
+        trace.endTurn("ok");
+        setStatus("就绪");
         break;
 
-      // "message"：后端落库用，界面已经实时显示过了
-    }
-  }
-
-  /** 回放历史消息（刷新页面后） */
-  function renderHistory(messages) {
-    for (const m of messages) {
-      if (m.role === "user") {
-        ui.addUserBubble(m.content);
-      } else if (m.role === "assistant") {
-        if (m.content) ui.addAssistantBubble().textContent = m.content;
-        for (const tc of m.tool_calls || []) {
-          // 历史里没有 source 字段，按工具名推断（MCP 工具带 __ 前缀）
-          const source = tc.function.name.includes("__") ? "mcp" : "local";
-          toolCards.set(
-            tc.id,
-            ui.createToolCard(tc.id, tc.function.name, tc.function.arguments, "done", source)
-          );
-        }
-      } else if (m.role === "tool") {
-        ui.setToolResult(toolCards.get(m.tool_call_id), m.content);
-      }
-    }
-  }
-
-  async function loadHistory() {
-    try {
-      const data = await api.history(sessionId);
-      renderHistory(data.messages || []);
-    } catch (e) {
-      ui.addErrorBubble("无法加载历史记录：" + e.message);
+      // "message"：后端落库用，界面已实时呈现
     }
   }
 
@@ -101,56 +136,82 @@ const chat = (() => {
     const text = input.value.trim();
     if (!text || busy) return;
 
+    if (!sessionId) {
+      await sessions.newSession();
+      if (!sessionId) return;
+    }
+
     input.value = "";
     autoGrow(input);
-    ui.addUserBubble(text);
+    ui.addUser(text);
     setBusy(true);
+    setStatus("正在生成…", "busy");
     currentBubble = null;
-    abortController = new AbortController();
+    trace.startTurn(text);
+
+    controller = new AbortController();
 
     try {
       await api.streamChat({
         sessionId,
         message: text,
         onEvent: handleEvent,
-        signal: abortController.signal,
+        signal: controller.signal,
       });
     } catch (e) {
-      if (e.name !== "AbortError") ui.addErrorBubble("请求失败：" + e.message);
+      if (e.name === "AbortError") {
+        trace.endTurn("stopped");
+        setStatus("已停止");
+      } else {
+        ui.addError("请求失败：" + e.message);
+        trace.addError("请求失败：" + e.message);
+        trace.endTurn("error");
+        setStatus("请求失败", "error");
+      }
     } finally {
       ui.setTyping(currentBubble, false);
       setBusy(false);
-      abortController = null;
+      controller = null;
+      // 会话标题/条数可能被后端更新，刷新左栏与头部
+      sessions.refresh().catch(() => {});
     }
   }
 
   function stop() {
-    if (abortController) abortController.abort();
+    if (controller) controller.abort();
   }
 
-  /** 输入框随内容自动增高 */
   function autoGrow(textarea) {
     textarea.style.height = "auto";
     textarea.style.height = Math.min(textarea.scrollHeight, 160) + "px";
   }
+
+  // ---------- 初始化 ----------
 
   function init() {
     const input = document.getElementById("input");
     const sendBtn = document.getElementById("send");
 
     sendBtn.addEventListener("click", () => (busy ? stop() : send()));
-
     input.addEventListener("input", () => autoGrow(input));
     input.addEventListener("keydown", (e) => {
-      // Enter 发送，Shift+Enter 换行
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         send();
       }
     });
 
-    loadHistory();
+    document.getElementById("sidebar-toggle").addEventListener("click", () => ui.openPanel("sidebar"));
+    document.getElementById("trace-toggle").addEventListener("click", () => ui.openPanel("trace"));
+    document.getElementById("trace-close").addEventListener("click", ui.closeDrawers);
+
+    document.getElementById("model-chip").addEventListener("click", () => settings.open("llm"));
+    document.getElementById("banner-settings").addEventListener("click", () => settings.open("llm"));
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") ui.closeDrawers();
+    });
   }
 
-  return { init, send, stop, get busy() { return busy; } };
+  return { init, openSession, updateMeta, send, stop };
 })();
