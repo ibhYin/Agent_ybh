@@ -25,10 +25,15 @@ def tool(func):
     return func
 
 
-def build_tools_schema() -> list[dict]:
-    """从函数签名自动生成 OpenAI 要求的 tools schema（LLM 靠它知道有哪些工具可用）。"""
+def build_tools_schema(registry: dict | None = None) -> list[dict]:
+    """从函数签名自动生成 OpenAI 要求的 tools schema（LLM 靠它知道有哪些工具可用）。
+
+    registry 默认是主 agent 的全局注册表；本地 MCP 服务各自传自己的字典，
+    这样同一套 schema 生成逻辑不用复制多份。
+    """
+    registry = TOOL_REGISTRY if registry is None else registry
     schema = []
-    for name, func in TOOL_REGISTRY.items():
+    for name, func in registry.items():
         properties, required = {}, []
         for param_name, param in inspect.signature(func).parameters.items():
             properties[param_name] = {
@@ -53,13 +58,14 @@ def build_tools_schema() -> list[dict]:
     return schema
 
 
-def execute_tool_result(name: str, arguments: dict) -> tuple[str, bool]:
+def execute_tool_result(name: str, arguments: dict, registry: dict | None = None) -> tuple[str, bool]:
     """执行工具，返回 (结果文本, 是否失败)。
 
     聊天循环只要文本；MCP 服务端还要知道成败（对应 CallToolResult.isError）。
     任何异常都转成错误文本、绝不向外抛——模型会看到并自行纠正。
     """
-    func = TOOL_REGISTRY.get(name)
+    registry = TOOL_REGISTRY if registry is None else registry
+    func = registry.get(name)
     if func is None:
         return f"错误：找不到工具 {name}", True
     try:
