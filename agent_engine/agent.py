@@ -47,7 +47,7 @@ def run_agent(messages: list[dict], llm_config: dict | None = None, mcp_hub=None
         yield {"type": "error", "message": "未配置 MODEL：请在 .env 中填写模型名称"}
         return
 
-    client = OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
+    client = _make_client(cfg["base_url"], cfg["api_key"])
     # 本地工具（@tool 注册表）+ 外部 MCP 工具合并成一份 schema
     tools_schema = build_tools_schema()
     if mcp_hub is not None:
@@ -130,6 +130,26 @@ def run_agent(messages: list[dict], llm_config: dict | None = None, mcp_hub=None
         # 回到循环开头：模型会看到工具结果，继续回答或调用下一个工具
 
     yield {"type": "error", "message": f"达到最大迭代次数（{MAX_ITERATIONS} 轮），自动停止"}
+
+
+def _make_client(base_url: str, api_key: str):
+    """构造 OpenAI 客户端，并绕开一个会让报错信息面目全非的环境问题。
+
+    httpx 默认 trust_env=True，会读 HTTP(S)_PROXY 与 NO_PROXY。
+    本机若把 IPv6 回环写成 `[::1]`（NO_PROXY 里很常见），httpx 解析端口会抛
+    `InvalidURL: Invalid port: ':1]'`——但 openai SDK 会把它包装成别的东西，
+    实测最终显示成"接口地址错误（404）"，把真正原因（配额/网络）彻底淹没。
+
+    这里显式传一个 trust_env=False 的 http_client：代理如需生效，
+    请通过 base_url 指向代理，而不是依赖环境变量。
+    """
+    import httpx
+
+    return OpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        http_client=httpx.Client(trust_env=False, timeout=httpx.Timeout(120.0, connect=10.0)),
+    )
 
 
 def _run_mcp_tool(mcp_hub, name: str, arguments_json: str) -> str:
