@@ -4,6 +4,7 @@
 只需在 .env 里修改 BASE_URL / API_KEY / MODEL 即可切换。
 """
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,14 +14,24 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 
 def normalize_base_url(url: str) -> str:
-    """有的服务要求填 https://api.xxx.com/v1，有的只填 https://api.xxx.com。
+    """补全 API 地址，避免 404。
 
-    统一补上 /v1 后缀，避免 404。
+    有的服务要求填 https://api.xxx.com/v1，有的只填 https://api.xxx.com，
+    还有的用版本号结尾（如火山方舟的 .../api/coding/v3）。
+    因此只有在**完全看不出路径版本**时才补 /v1，否则原样保留。
+
+    反例（真实踩过的）：把 .../api/coding/v3 补成 .../api/coding/v3/v1 → 404。
     """
     url = url.strip().rstrip("/")
-    if url and not url.endswith("/v1"):
-        url += "/v1"
-    return url
+    if not url:
+        return url
+
+    # 已经有版本段（/v1、/v3、/v1beta …）就不要再补
+    last_segment = url.rsplit("/", 1)[-1]
+    if re.fullmatch(r"v\d+[\w.-]*", last_segment, flags=re.IGNORECASE):
+        return url
+
+    return url + "/v1"
 
 
 def get_config(overrides: dict | None = None) -> dict:
