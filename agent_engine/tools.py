@@ -53,16 +53,28 @@ def build_tools_schema() -> list[dict]:
     return schema
 
 
-def execute_tool(name: str, arguments_json: str) -> str:
-    """执行工具并返回结果字符串。任何异常都转成错误文本，绝不向外抛——模型会看到并自行纠正。"""
+def execute_tool_result(name: str, arguments: dict) -> tuple[str, bool]:
+    """执行工具，返回 (结果文本, 是否失败)。
+
+    聊天循环只要文本；MCP 服务端还要知道成败（对应 CallToolResult.isError）。
+    任何异常都转成错误文本、绝不向外抛——模型会看到并自行纠正。
+    """
     func = TOOL_REGISTRY.get(name)
     if func is None:
-        return f"错误：找不到工具 {name}"
+        return f"错误：找不到工具 {name}", True
+    try:
+        return str(func(**arguments)), False
+    except Exception as e:
+        return f"工具执行出错：{type(e).__name__}: {e}", True
+
+
+def execute_tool(name: str, arguments_json: str) -> str:
+    """执行工具并返回结果字符串（聊天循环入口，不区分成败）。"""
     try:
         args = json.loads(arguments_json) if arguments_json else {}
-        return str(func(**args))
-    except Exception as e:
+    except Exception as e:  # 参数不是合法 JSON，同样按工具错误处理
         return f"工具执行出错：{type(e).__name__}: {e}"
+    return execute_tool_result(name, args)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -130,3 +142,9 @@ def write_file(path: str, content: str) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return f"已写入 workspace/{p.relative_to(WORKSPACE)}"
+
+
+@tool
+def read_file(path: str) -> str:
+    """读取工作区内文本文件的内容（相对 workspace/ 的路径，如 "notes.txt"）。"""
+    return _resolve_safe_path(path).read_text(encoding="utf-8")
