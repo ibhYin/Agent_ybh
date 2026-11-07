@@ -2,7 +2,7 @@
 
 从零手写的一个带网页聊天界面的智能体：模型思考 → 调用工具 → 结果回传 → 最终回答，**每一步实时可见**。
 
-- 界面：**三段式工作台**（左栏会话 / 中栏对话 / 右栏执行过程），深色主题，窄屏自动折叠为抽屉
+- 界面：**三段式工作台**（左栏会话 / 中栏对话 / 右栏执行过程），**四套主题**可换，窄屏自动折叠为抽屉
 - 后端：Django 5 + 原生 HTML/JS 前端（无前端框架，静态资源按职责拆分模块）
 - LLM：OpenAI 兼容协议，**任意第三方服务**（DeepSeek / Kimi / 通义千问 / 硅基流动 / vLLM / Ollama…），在页面【设置】里即可切换（.env 仅作可选兜底）
 - 工具：设置面板实时查看可用工具列表（@tool 注册后自动出现）
@@ -69,7 +69,7 @@ chat/                  # Django 层
 ├── crypto.py          # API Key 对称加密（Fernet）
 ├── templates/chat/index.html   # 页面骨架（三段式：左栏 / 中栏 / 右栏）
 └── static/chat/       # 前端资源，按职责拆开
-    ├── css/app.css    #   深色主题与布局（CSS 变量 + 响应式抽屉）
+    ├── css/app.css    #   主题令牌 + 布局（CSS 变量 + 响应式抽屉）
     └── js/
         ├── api.js     #   后端接口封装，加接口只改这里
         ├── ui.js      #   DOM 渲染（消息气泡、轻量 Markdown、服务卡片、抽屉）
@@ -373,6 +373,29 @@ python manage.py test chat.tests.ArchitectureDataTest
 
 字段约定：`files` 只写仓库内相对路径；`symbols` 写函数/类名，不写行号（行号会漂）。
 
+## 主题（设置 → 外观）
+
+四套配色，聊天页 / MCP 管理页 / 架构页共用同一个选择，存在 `localStorage.ui_theme`：
+
+| 主题 | 说明 |
+|---|---|
+| `light` | 浅色，默认 |
+| `warm` | 暖色纸感，米白 + 暖橙 |
+| `dark` | 深色工作台（原来的默认） |
+| `navy` | 午夜蓝，深蓝底 + 青色强调 |
+
+实现方式：所有颜色都是 `:root` 里的 CSS 变量，主题只是同名变量的另一组取值，
+由 `<html data-theme="...">` 切换。因此**加主题不用改任何组件样式**：
+
+1. 在 `app.css` 里复制 `html[data-theme="dark"] { ... }` 改颜色，换一个 id
+2. `index.html` 的 `#theme-grid` 里加一张 `.theme-card`（含 `data-theme`）
+3. `settings.js` 的 `THEMES` 数组加上这个 id
+4. `_theme_init.html` 的 `allowed` 数组加上这个 id
+
+`<head>` 里的 `_theme_init.html` 会在样式表之前同步读 localStorage，
+避免刷新时先闪一下默认主题。CSS 里用的是 `color-mix()` 混合强调色，
+所以新增主题只要给对主色，各种半透明边线会自动跟着变。
+
 ## 界面说明（给要改前端的人）
 
 页面拆成四块，改功能时先找对应文件：
@@ -389,6 +412,7 @@ python manage.py test chat.tests.ArchitectureDataTest
 | 改 MCP 管理页 | `mcp.html` + `js/mcp.js` + `css/mcp.css` |
 | 改架构图内容 | 只改 `agent_engine/architecture.py`；渲染在 `js/architecture.js` |
 | 改架构图样式 | `css/architecture.css` |
+| 加一套主题 | `app.css` 复制一组变量 + `index.html` 里加一张 `.theme-card` + `settings.js` 的 `THEMES` |
 | 加一个本地 MCP 服务 | 在 `agent_engine/mcp_servers/` 新建模块，在 `mcp_servers/__init__.py` 登记 |
 
 布局断点：`>1180px` 三栏；`900–1180px` 右栏收成抽屉；`<900px` 左栏也收成抽屉。

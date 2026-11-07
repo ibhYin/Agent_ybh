@@ -7,6 +7,8 @@ const settings = (() => {
   let toolsRequest = null;   // 并发去重：启动与打开设置可能同时触发
   let toolsCache = null;     // 连接 MCP 要起子进程（约 2s），成功后缓存，避免每次开设置都重连
 
+  const THEMES = ["light", "warm", "dark", "navy"];
+
   const drawer = () => document.getElementById("settings-drawer");
   const overlay = () => document.getElementById("settings-overlay");
 
@@ -16,6 +18,7 @@ const settings = (() => {
     drawer().classList.remove("hidden");
     overlay().classList.remove("hidden");
     switchTab(tabName);
+    syncThemeCards();
     loadConfig();
     loadTools();
     loadServers();
@@ -33,6 +36,29 @@ const settings = (() => {
     for (const panel of document.querySelectorAll(".tab-panel")) {
       panel.classList.toggle("active", panel.dataset.panel === name);
     }
+  }
+
+  // ---------- 外观 ----------
+
+  function currentTheme() {
+    return document.documentElement.getAttribute("data-theme") || "light";
+  }
+
+  function syncThemeCards() {
+    for (const card of document.querySelectorAll(".theme-card")) {
+      const active = card.dataset.theme === currentTheme();
+      card.classList.toggle("active", active);
+      card.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  }
+
+  function applyTheme(name) {
+    if (!THEMES.includes(name)) return;
+    document.documentElement.setAttribute("data-theme", name);
+    try {
+      localStorage.setItem("ui_theme", name);
+    } catch (e) { /* 隐私模式忽略 */ }
+    syncThemeCards();
   }
 
   // ---------- LLM ----------
@@ -287,6 +313,11 @@ const settings = (() => {
       tab.addEventListener("click", () => switchTab(tab.dataset.tab));
     }
 
+    document.getElementById("theme-grid").addEventListener("click", (e) => {
+      const card = e.target.closest(".theme-card");
+      if (card) applyTheme(card.dataset.theme);
+    });
+
     document.getElementById("save-config").addEventListener("click", saveConfig);
     document.getElementById("mcp-transport").addEventListener("change", toggleTransportFields);
     document.getElementById("mcp-save").addEventListener("click", saveServer);
@@ -300,6 +331,7 @@ const settings = (() => {
     document.getElementById("tools-refresh").addEventListener("click", () => loadTools(true));
 
     // 首屏点亮左栏状态灯
+    syncThemeCards();
     loadConfig();
     loadTools();
   }

@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+{% include "chat/_theme_init.html" %}
 <title>智能体 MVP</title>
 <link rel="stylesheet" href="{% static 'chat/css/app.css' %}">
 </head>
@@ -172,6 +173,7 @@
 
   <div class="tabs">
     <button class="tab active" data-tab="llm">LLM</button>
+    <button class="tab" data-tab="theme">外观</button>
     <button class="tab" data-tab="mcp">MCP 服务</button>
     <button class="tab" data-tab="tools">可用工具</button>
   </div>
@@ -197,6 +199,42 @@
       <div id="llm-status" class="status-line"></div>
       <p id="llm-current" class="hint">读取中…</p>
       <p class="hint">配置存服务器数据库，立即生效。API Key 加密存储，前端不持有也不回显；留空项回退 <kbd>.env</kbd>。</p>
+    </section>
+
+    <!-- 外观 -->
+    <section class="tab-panel" data-panel="theme">
+      <p class="hint" style="margin-top:0">
+        主题保存在浏览器本地，聊天 / MCP 管理页 / 架构页共用同一个选择。
+      </p>
+      <div id="theme-grid" class="theme-grid">
+        <button class="theme-card" type="button" data-theme="light">
+          <span class="theme-swatch"><i class="b1"></i><i class="b2"></i><i class="b3"></i></span>
+          <span class="theme-name">浅色</span>
+          <span class="theme-desc">干净明亮，默认</span>
+          <span class="theme-check">✓</span>
+        </button>
+        <button class="theme-card" type="button" data-theme="warm">
+          <span class="theme-swatch"><i class="b1"></i><i class="b2"></i><i class="b3"></i></span>
+          <span class="theme-name">暖色纸感</span>
+          <span class="theme-desc">米白与暖橙，适合久读</span>
+          <span class="theme-check">✓</span>
+        </button>
+        <button class="theme-card" type="button" data-theme="dark">
+          <span class="theme-swatch"><i class="b1"></i><i class="b2"></i><i class="b3"></i></span>
+          <span class="theme-name">深色</span>
+          <span class="theme-desc">原来的深色工作台</span>
+          <span class="theme-check">✓</span>
+        </button>
+        <button class="theme-card" type="button" data-theme="navy">
+          <span class="theme-swatch"><i class="b1"></i><i class="b2"></i><i class="b3"></i></span>
+          <span class="theme-name">午夜蓝</span>
+          <span class="theme-desc">深蓝底 + 青色强调</span>
+          <span class="theme-check">✓</span>
+        </button>
+      </div>
+      <p class="hint">
+        想加主题：在 <kbd>app.css</kbd> 复制一组变量，再在上面的卡片里加一项即可。
+      </p>
     </section>
 
     <!-- MCP -->

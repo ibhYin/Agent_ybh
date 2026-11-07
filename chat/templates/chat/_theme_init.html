@@ -1,0 +1,15 @@
+{% comment %}
+  在 <head> 里、样式表之前同步执行，避免切换主题时闪一下。
+  三张页面（聊天 / MCP / 架构）共用同一个 localStorage key。
+{% endcomment %}
+<script>
+  (function () {
+    var allowed = ["light", "warm", "dark", "navy"];
+    var theme = "light";
+    try {
+      var saved = localStorage.getItem("ui_theme");
+      if (allowed.indexOf(saved) !== -1) theme = saved;
+    } catch (e) { /* 隐私模式禁用 localStorage 时用默认 */ }
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
