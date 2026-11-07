@@ -101,8 +101,25 @@ def agent_card(request):
     """AgentCard：给外部 agent 做能力发现。"""
     row = LLMConfig.singleton()
     model = row.model or ""
+
     from agent_engine.tools import build_tools_schema
+
     tool_names = [t["function"]["name"] for t in build_tools_schema()]
+
+    # MCP 技能无法在 AgentCard 里"连上再列工具"：拉卡片是发现阶段的轻请求，
+    # 每次都 spawn 子进程既慢又吵。这里按已配置的服务名查内置目录拿到**真实工具名**，
+    # 让 build_agent_card 的技能推导能匹配上（占位名匹配不到任何规则）。
+    try:
+        from agent_engine.mcp_config import load_specs
+        from agent_engine.mcp_servers import builtin_specs
+
+        catalog = {item["name"]: item.get("tools", []) for item in builtin_specs()}
+        for spec in load_specs():
+            for tool in catalog.get(spec.name, []):
+                tool_names.append(f"{spec.name}__{tool}")
+    except Exception as exc:  # 卡片生成不该因为配置读不出来而失败
+        logger.warning("AgentCard 读取 MCP 配置失败：%s", exc)
+
     card = proto.build_agent_card(
         base_url=request.build_absolute_uri("/"),
         model_name=model,

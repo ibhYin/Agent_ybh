@@ -238,6 +238,28 @@ class A2AHttpTest(TransactionTestCase):
         self.assertTrue(card["capabilities"]["streaming"])
         self.assertTrue(card["skills"])
 
+    def test_agent_card_infers_mcp_skills_from_configured_services(self):
+        """卡片要能反映"配了哪些 MCP 服务"。
+
+        这里曾是 bug：传进去的是 `服务名__x` 这种占位工具名，
+        而技能推导按真实工具名匹配（__query / list_files），所以永远匹配不上，
+        卡片只剩一条通用技能——外部 agent 因此看不到 sqlite 与文件能力。
+        """
+        from chat.models import MCPServerConfig
+
+        MCPServerConfig.objects.create(
+            name="sqlite", transport="stdio", command="x",
+            args=["-m", "agent_engine.mcp_servers.sqlite"],
+            env={"MCP_SQLITE_DB": "/tmp/x.db"}, enabled=True)
+        MCPServerConfig.objects.create(
+            name="filesystem", transport="stdio", command="x",
+            args=["-m", "agent_engine.mcp_servers.fs"], enabled=True)
+
+        card = self.client.get("/agent-card.json").json()
+        skill_ids = {s["id"] for s in card["skills"]}
+        self.assertIn("sqlite-query", skill_ids)
+        self.assertIn("filesystem", skill_ids)
+
     def test_well_known_redirects(self):
         resp = self.client.get("/.well-known/agent-card.json")
         self.assertEqual(resp.status_code, 302)
