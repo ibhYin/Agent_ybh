@@ -14,3 +14,7 @@ workspace/
 # 求职素材（私人，本地独立仓库，不推送）
 # askdb 已拆到容器根目录（../askdb/），不在本仓库内
 career/
+
+# 外部 MCP 服务配置：本机路径 / 可能含密钥，各人不同。
+# 仓库里只放 mcp.json.example，实际使用时复制成 mcp.json
+mcp.json

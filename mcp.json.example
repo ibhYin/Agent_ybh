@@ -1,0 +1,20 @@
+{
+  "_说明": "复制本文件为 mcp.json 后按需修改。mcp.json 已被 .gitignore 忽略（含本机路径/密钥）。也可全部在页面【设置 → MCP 服务】里配置，二者会合并，同名以页面（数据库）为准。",
+  "mcpServers": {
+    "selfdemo": {
+      "_注释": "连本项目自己的 MCP 服务端，用来验证整条链路是否通",
+      "command": "/opt/anaconda3/envs/langchain/bin/python",
+      "args": ["-m", "agent_engine.mcp_server"],
+      "cwd": "/absolute/path/to/agent_ybh"
+    },
+    "filesystem": {
+      "_注释": "官方文件系统服务，需要本机有 node/npx",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "remote-sse": {
+      "_注释": "连一个 SSE 方式的 MCP 服务（本项目自己也可以这样暴露）",
+      "url": "http://127.0.0.1:8022/sse"
+    }
+  }
+}

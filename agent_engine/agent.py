@@ -27,14 +27,17 @@ SYSTEM_PROMPT = """你是运行在智能体循环中的助手，通过工具帮�
 4. 工具返回错误时，向用户说明并尝试用合法方式纠正。"""
 
 
-def run_agent(messages: list[dict], llm_config: dict | None = None):
+def run_agent(messages: list[dict], llm_config: dict | None = None, mcp_hub=None):
     """消息历史 -> 事件流。事件类型：
     - {"type":"text_delta","content"}   模型输出文本分片（前端打字机效果）
-    - {"type":"tool_start","id","name","args"}  开始执行某个工具
-    - {"type":"tool_result","id","name","result"}  工具执行结果
+    - {"type":"tool_start","id","name","args","source"}  开始执行某个工具
+    - {"type":"tool_result","id","name","result","source"}  工具执行结果
     - {"type":"message","message"}  一条已完成的 OpenAI 格式消息（调用方用于持久化，前端忽略）
     - {"type":"done","content"}     最终回答，循环结束
     - {"type":"error","message"}    出错（配置错误 / API 错误 / 超过迭代上限）
+
+    mcp_hub：可选的 MCPHub（agent_engine/mcp_config.py）。传入时把外部 MCP 服务的
+    工具合并进 tools schema，执行时按工具名路由回去；不传则行为与从前完全一致。
     """
     cfg = config.get_config(llm_config)
     if not cfg["api_key"]:
@@ -45,7 +48,10 @@ def run_agent(messages: list[dict], llm_config: dict | None = None):
         return
 
     client = OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"])
+    # 本地工具（@tool 注册表）+ 外部 MCP 工具合并成一份 schema
     tools_schema = build_tools_schema()
+    if mcp_hub is not None:
+        tools_schema = tools_schema + mcp_hub.connect_all()
 
     # 注入防护：system 提示只加入本次请求的本地副本（+ 生成新列表），
     # 不写回调用方的消息历史、不落库
@@ -110,9 +116,13 @@ def run_agent(messages: list[dict], llm_config: dict | None = None):
         # ---------- 第 5 步：逐个执行工具，结果回填 ----------
         # 模型"看不见"工具执行过程，全靠这条 role="tool" 消息 —— 这是 agent 的核心机制
         for tc in tool_calls.values():
-            yield {"type": "tool_start", "id": tc["id"], "name": tc["name"], "args": tc["arguments"]}
-            result = execute_tool(tc["name"], tc["arguments"])
-            yield {"type": "tool_result", "id": tc["id"], "name": tc["name"], "result": result}
+            source = "mcp" if (mcp_hub is not None and mcp_hub.has(tc["name"])) else "local"
+            yield {"type": "tool_start", "id": tc["id"], "name": tc["name"], "args": tc["arguments"], "source": source}
+            if source == "mcp":
+                result = _run_mcp_tool(mcp_hub, tc["name"], tc["arguments"])
+            else:
+                result = execute_tool(tc["name"], tc["arguments"])
+            yield {"type": "tool_result", "id": tc["id"], "name": tc["name"], "result": result, "source": source}
             tool_message = {"role": "tool", "tool_call_id": tc["id"], "content": result}
             messages.append(tool_message)
             yield {"type": "message", "message": tool_message}
@@ -120,6 +130,21 @@ def run_agent(messages: list[dict], llm_config: dict | None = None):
         # 回到循环开头：模型会看到工具结果，继续回答或调用下一个工具
 
     yield {"type": "error", "message": f"达到最大迭代次数（{MAX_ITERATIONS} 轮），自动停止"}
+
+
+def _run_mcp_tool(mcp_hub, name: str, arguments_json: str) -> str:
+    """执行 MCP 工具，参数可能是 LLM 给出的任意字符串，先解析再调用。
+
+    与本地工具保持同样的契约：任何错误都转成文本回传给模型，绝不抛出。
+    """
+    try:
+        args = json.loads(arguments_json) if arguments_json else {}
+    except Exception as e:
+        return f"工具执行出错：参数不是合法 JSON：{type(e).__name__}: {e}"
+    if not isinstance(args, dict):
+        return f"工具执行出错：参数必须是 JSON 对象，收到 {type(args).__name__}"
+    text, _failed = mcp_hub.call(name, args)
+    return text
 
 
 def _friendly_error(e: Exception) -> str:

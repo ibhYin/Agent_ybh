@@ -2,10 +2,11 @@
 
 从零手写的一个带网页聊天界面的智能体：模型思考 → 调用工具 → 结果回传 → 最终回答，**每一步实时可见**。
 
-- 后端：Django 5 + 原生 HTML/JS 前端（无前端框架）
+- 后端：Django 5 + 原生 HTML/JS 前端（无前端框架，静态资源已拆分模块）
 - LLM：OpenAI 兼容协议，**任意第三方服务**（DeepSeek / Kimi / 通义千问 / 硅基流动 / vLLM / Ollama…），在**页面右上角【设置】面板**即可切换（.env 仅作可选兜底）
 - 工具：**页面设置面板实时查看可用工具列表**（@tool 注册后自动出现）
-- MCP：同一份工具注册表也能作为 **MCP 服务**被 Claude Desktop / Cursor 直接调用，支持 stdio 与 SSE 两种传输（`python -m agent_engine.mcp_server [--transport sse]`）
+- MCP 服务端：同一份工具注册表能作为 **MCP 服务**被 Claude Desktop / Cursor 直接调用，支持 stdio 与 SSE 两种传输（`python -m agent_engine.mcp_server [--transport sse]`）
+- MCP 客户端：本项目的 agent 也能**反过来调用外部 MCP 服务**，在页面【设置 → MCP 服务】里增删，或写根目录 `mcp.json`
 - 对话：sqlite 持久化，刷新页面不丢失
 - 安全：工具沙箱（workspace/）、注入防护、API Key 加密存储
 
@@ -49,14 +50,24 @@ agent_engine/          # 智能体核心（不依赖 Django，可单独复用）
 ├── tools.py           # 工具注册机制 + 4 个示例工具（@tool 装饰器）
 ├── agent.py           # Agentic Loop 主循环（生成器，逐步 yield 事件）
 ├── config.py          # 读取 .env：BASE_URL / API_KEY / MODEL
-├── mcp_server.py      # 把同一份工具注册表暴露成 MCP 服务（stdio + SSE 两种传输）
-├── tests_mcp_server.py  # stdio 传输测试（in-process + 真实子进程）
-├── tests_mcp_sse.py   # SSE 传输测试（真起 uvicorn + 并发连接 + Host/Origin 校验）
+├── mcp_server.py      # 对外提供工具：MCP 服务端（stdio + SSE 两种传输）
+├── mcp_client.py      # 调用外部工具：MCP 客户端（同步/异步桥接，连接常驻）
+├── mcp_config.py      # 外部服务来源合并（mcp.json + 数据库）+ MCPHub 路由
+├── tests_mcp_server.py  # 服务端测试：stdio 传输（in-process + 真实子进程）
+├── tests_mcp_sse.py   # 服务端测试：SSE 传输（真起 uvicorn + 并发 + Host/Origin 校验）
+└── tests_mcp_client.py  # 客户端测试：连接生命周期、错误信息、配置合并
 chat/                  # Django 层
-├── views.py           # 页面 / 工具列表 / 配置 / 历史 / SSE 聊天流 端点
-├── models.py          # ChatMessage（对话）+ LLMConfig（加密配置）
+├── views.py           # 页面 / 工具 / 配置 / 历史 / 聊天流 / MCP 服务管理 端点
+├── models.py          # ChatMessage + LLMConfig（加密配置）+ MCPServerConfig
 ├── crypto.py          # API Key 对称加密（Fernet）
-└── templates/chat/index.html   # 聊天界面（单文件内联 CSS/JS）
+├── templates/chat/index.html   # 页面结构（设置面板用标签页组织）
+└── static/chat/       # 前端资源，按职责拆开
+    ├── css/app.css    #   全部样式（CSS 变量，跟随系统深色模式）
+    └── js/
+        ├── api.js     #   后端接口封装，加功能只改这里
+        ├── ui.js      #   DOM 渲染（气泡、工具卡片、服务卡片）
+        ├── chat.js    #   会话、SSE 事件 -> 界面
+        └── settings.js#   设置面板三个标签页
 ```
 
 ## 安全设计
@@ -215,6 +226,53 @@ python -m agent_engine.mcp_server --transport sse --host 0.0.0.0  # 对外监听
 python -m unittest agent_engine.tests_mcp_sse -v
 ```
 
+## 让 agent 调用外部 MCP 服务
+
+上面那节是"本项目**对外**提供工具"，这节反过来：本项目**使用**别人的 MCP 工具。
+
+配置有两个来源，合并使用，**同名时以页面（数据库）为准**：
+
+| 来源 | 适合 | 怎么改 |
+|------|------|--------|
+| 页面【设置 → MCP 服务】 | 临时调试、即时生效 | 填表保存，不用重启 |
+| 项目根目录 `mcp.json` | 跟着仓库走、和别的工具共用 | 复制 `mcp.json.example` 改，重启生效 |
+
+`mcp.json` 的格式与 Claude Desktop 的 `claude_desktop_config.json` 兼容，`command` 判为 stdio、`url` 判为 sse：
+
+```json
+{
+  "mcpServers": {
+    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] },
+    "remote": { "url": "http://127.0.0.1:8022/sse" }
+  }
+}
+```
+
+连上后，远程工具以 **`服务名__工具名`** 的形式进入模型可用的工具列表（如 `filesystem__read_file`）。
+前端会标上 `MCP` 徽章，事件流里 `source` 字段为 `"mcp"`。
+
+### 实现上的两个坑（都是 anyio 的机制）
+
+1. **同步/异步接缝**：`run_agent()` 是同步生成器，MCP SDK 是全异步的。这里用「后台线程 + 常驻连接」桥接（`mcp_client.py`），`run_agent` 一行没改。备选方案是每次 `asyncio.run`（stdio 服务每次重开要 1–2 秒）或把整条链路改异步（动到教学核心代码）。
+
+2. **cancel scope 必须同进同出**：`Client.__aenter__()` 内部建立 anyio 的 cancel scope，要求"在哪个任务里进入就在哪个任务里退出"。所以连接、请求处理、关闭**全在同一个任务内**完成，跨线程只投递请求。否则关闭时抛 `Attempted to exit cancel scope in a different task`。同理，关闭不能靠 `loop.stop()`——那会在 `__aexit__` 执行到一半打断循环。
+
+### 排错
+
+| 现象 | 原因 |
+|------|------|
+| 设置面板里"测试"报 `连接超时` | 命令不能执行或 URL 不可达；先在终端手动跑一遍 |
+| `连接失败：MCPError: Connection closed` | 进程起来了但不是 MCP 服务（比如误填了 `echo`） |
+| 工具列表里没有该服务的工具 | 服务连不上；看【可用工具】页或后端日志里的告警 |
+| 想在页面上删掉 mcp.json 里的服务 | 删不掉是设计如此；直接改文件 |
+| 模型不调用 MCP 工具 | 模型需支持 function calling；工具名是 `服务名__工具名`，可在提示里点名 |
+
+自查（真起子进程、覆盖连接生命周期与错误信息）：
+
+```bash
+python -m unittest agent_engine.tests_mcp_client -v
+```
+
 ## 切换不同的 LLM 服务
 
 打开页面右上角【设置】面板，填三行配置即可（[OpenAI 兼容协议](https://platform.openai.com/docs/api-reference)）：
@@ -240,10 +298,11 @@ Base URL 不带 `/v1` 会自动补全。需注意：**模型必须支持 functio
 
 ## 后续演进方向（当前刻意简化）
 
-- MCP 客户端（让本项目的 agent 反过来调用外部 MCP 工具，进行中）
 - 多会话列表（当前只有单会话，session_id 存 localStorage）
 - 用户系统与消息归属（当前 `session_id` 谁都能查）
 - 访问鉴权（当前服务仅监听 127.0.0.1，无访问口令）
 - CSRF 防护（当前 `@csrf_exempt` 仅为本地学习简化）
 - API 用量 / 频率限制（当前仅 10 轮迭代上限）
-- 加密密钥独立管理（当前由 Django SECRET_KEY 派生）
+- 加密密钥独立管理（当前由 Django SECRET_KEY 派生；SECRET_KEY 是仓库里的开发默认值）
+- MCP 服务健康检查与重连（当前连接失败只记录，不自动重试）
+- MCP 工具审批（外部服务可执行任意本地命令，当前默认信任配置者）
