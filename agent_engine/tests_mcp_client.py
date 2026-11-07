@@ -72,10 +72,18 @@ class DescribeErrorTest(unittest.TestCase):
         self.assertEqual(_describe_error(ValueError("boom")), "ValueError: boom")
 
     def test_exception_group_is_unwrapped(self):
-        """anyio 的 ExceptionGroup 默认文字没有信息量，必须挖到最里层。"""
-        from exceptiongroup import ExceptionGroup
+        """anyio 的 ExceptionGroup 默认文字没有信息量，必须挖到最里层。
 
-        group = ExceptionGroup("unhandled errors in a TaskGroup", [FileNotFoundError("no such cmd")])
+        ExceptionGroup 是 3.11 才内置的：3.10 要装 exceptiongroup 包，
+        3.11+ 直接用内置的。CI 跑 3.13，写死 import exceptiongroup 会直接报错。
+        """
+        import builtins
+
+        Group = getattr(builtins, "ExceptionGroup", None)
+        if Group is None:  # Python 3.10：用 exceptiongroup 兼容包
+            from exceptiongroup import ExceptionGroup as Group
+
+        group = Group("unhandled errors in a TaskGroup", [FileNotFoundError("no such cmd")])
         self.assertEqual(_describe_error(group), "FileNotFoundError: no such cmd")
 
     def test_empty_message_still_names_the_type(self):
